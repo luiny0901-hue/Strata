@@ -32,7 +32,7 @@ if not exist "%VECTOR%" (echo NVFP4 fork refusal projection is missing.& pause& 
 if not exist "%DATA_ROOT%\logs" mkdir "%DATA_ROOT%\logs"
 if errorlevel 1 (echo Could not create the Strata log directory.& pause& exit /b 17)
 if not exist "%PROFILE_DIR%" mkdir "%PROFILE_DIR%"
-"%PYTHON%" "%STRATA_ROOT%tools\iq4xs_opencode_setup.py" render-profile --mode on --strata-root "%STRATA_ROOT%" --data-root "%DATA_ROOT%" --output "%PROFILE%"
+"%PYTHON%" "%STRATA_ROOT%tools\iq4xs_opencode_setup.py" render-profile --mode on --strata-root "%STRATA_ROOT%." --data-root "%DATA_ROOT%" --output "%PROFILE%"
 if errorlevel 1 (echo Could not render the ON profile.& pause& exit /b 18)
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$c=Get-NetTCPConnection -State Listen -LocalPort 8080 -ErrorAction SilentlyContinue; if ($c) { $c | Select-Object LocalAddress,LocalPort,OwningProcess | Format-Table -AutoSize; exit 1 } else { exit 0 }"
