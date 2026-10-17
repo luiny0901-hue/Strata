@@ -114,9 +114,8 @@ if ($blockRule) {
 }
 
 foreach ($legacyRule in $legacyRulesToRestrict) {
-    $legacyRule | Get-NetFirewallAddressFilter |
-        Set-NetFirewallAddressFilter -RemoteAddress LocalSubnet -ErrorAction Stop | Out-Null
-    Set-NetFirewallRule -Name $legacyRule.Name -Profile Private -ErrorAction Stop
+    Set-NetFirewallRule -PolicyStore PersistentStore -Name $legacyRule.Name `
+        -Profile Private -RemoteAddress LocalSubnet -ErrorAction Stop
     Write-Output "Restricted existing rule '$($legacyRule.DisplayName)' to Private/LocalSubnet."
 }
 
