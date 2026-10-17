@@ -30,7 +30,6 @@ GPU vision started successfully, but the engine used about 21.8 GiB (22.3 GB) of
 - [`receipt.json`](receipt.json): host, settings, fixture hashes, run method and scope.
 - [`benchmark.py`](benchmark.py): request generator and measurement harness.
 - [`verification.txt`](verification.txt): local setup unit tests (12/12) and Python syntax check.
-- [`SHA256SUMS.txt`](SHA256SUMS.txt): hashes of the committed report and per-run evidence.
 - [`off-cpu.json`](off-cpu.json), [`off-gpu.json`](off-gpu.json), [`on-cpu.json`](on-cpu.json), [`on-gpu.json`](on-gpu.json): warm-up and per-request API measurements.
 - Image fixture bytes are not committed because the screenshot contains source-like text from a separate local project. The receipt keeps SHA-256 hashes; reproducing the exact visual input requires the original local fixture.
 - The API does not expose isolated image-encoder timing. Client wall time minus server prefill/decode time is a residual that includes image encoding and other request/server/network overhead, not a direct encoder measurement.
