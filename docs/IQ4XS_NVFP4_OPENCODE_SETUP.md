@@ -107,9 +107,11 @@ include model weights or fork binaries, or store an OpenCode API key.
     ```
 
    Before modifying the config, the script saves a timestamped backup. It
-   preserves the existing key and other settings, changing only `model` and
-   the UD-IQ4_XS model entry. It refuses a missing Strata provider or a
-   different base URL.
+   preserves the existing key and other settings, updates the selected model
+   entry and default, and explicitly selects PowerShell 7 (`pwsh`) for Windows
+   terminal commands. It refuses a missing Strata provider or a different base
+   URL. The command also installs the bounded Windows and Linux command runners
+   under `~/.config/opencode/scripts/` without changing neighboring scripts.
 
    The example also carries the verified long-project defaults: a 100-step
    build-agent ceiling, automatic compaction retaining 20,000 recent tokens
@@ -120,10 +122,42 @@ include model weights or fork binaries, or store an OpenCode API key.
    the step ceiling is finite; keep durable project state in `AGENTS.md` or a
    task handoff. Copy or merge
    [opencode-korean-long-project-instructions.example.md](opencode-korean-long-project-instructions.example.md)
-   to `~/.config/opencode/KOREAN_INSTRUCTIONS.md`; do not overwrite personal
-   instructions without saving them first. Restart Rider/OpenCode after
-   changing the global config. These settings are not applied by
-   `apply-opencode`, which changes only the selected model entry and default.
+   to `~/.config/opencode/KOREAN_INSTRUCTIONS.md`; merge it with personal
+   instructions rather than overwriting them. Restart Rider/OpenCode after
+   changing the global config.
+
+   To run tests in Ubuntu WSL from Windows OpenCode, install the shell runner
+   into the Linux user's config directory. From this checkout in PowerShell:
+
+    ```powershell
+    $runner = (Resolve-Path .\tools\opencode\run_bounded_command.sh).Path
+    $drive = $runner.Substring(0, 1).ToLowerInvariant()
+    $relative = $runner.Substring(3).Replace('\', '/')
+    $linuxRunner = "/mnt/$drive/$relative"
+    $bashTemplate = @'
+set -eu
+source="__SOURCE__"
+target="$HOME/.config/opencode/scripts/run_bounded_command.sh"
+mkdir -p "$(dirname "$target")"
+if [ -f "$target" ] && ! cmp -s "$source" "$target"; then
+  backup="$target.pre-iq4xs-$(date -u +%Y%m%dT%H%M%SZ)-$$.bak"
+  cp -p "$target" "$backup"
+fi
+install -m 0755 "$source" "$target"
+cmp -s "$source" "$target"
+'@
+    $bashScript = $bashTemplate.Replace('__SOURCE__', $linuxRunner)
+    $encodedScript = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($bashScript))
+    wsl.exe -d Ubuntu -- bash -lc "printf %s $encodedScript | base64 -d | bash"
+    ```
+
+   The Windows BAT starts Strata on `127.0.0.1`. In WSL NAT mode, Linux
+   OpenCode cannot use that Windows loopback endpoint, and this setup does not
+   expose the Strata server to the WSL network. On this PC, `opencode` typed
+   inside Ubuntu resolves to the Windows CLI shim; use Windows OpenCode and
+   invoke Linux tests explicitly with `wsl.exe -d Ubuntu -- bash -lc ...`.
+   Native WSL OpenCode and a Linux Node toolchain are not configured by this
+   setup.
 
 7. Start one mode by double-clicking its batch file. Each batch file renders
    its portable profile, checks required files, and refuses an occupied port

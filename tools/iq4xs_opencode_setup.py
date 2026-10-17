@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -29,6 +30,7 @@ SHARD_NAMES = (
     "Qwen3.8-Flash-Next-UD-IQ4_XS-00003-of-00003.gguf",
 )
 DEFAULT_MANIFEST = "docs/reports/2026-10-17-iq4xs-artifact-manifest.json"
+TERMINAL_RUNNER_FILES = ("run_bounded_command.ps1", "run_bounded_command.sh")
 
 
 def _template_path(repository_root: Path, mode: str) -> Path:
@@ -105,8 +107,15 @@ def opencode_model_definition() -> dict[str, Any]:
     }
 
 
-def configure_opencode_document(document: dict[str, Any]) -> bool:
-    """Update only the default model and this model's provider entry."""
+def preferred_opencode_shell() -> str:
+    """Return a predictable shell for the current OpenCode host."""
+    if os.name == "nt":
+        return "pwsh" if shutil.which("pwsh") else "powershell"
+    return "bash"
+
+
+def configure_opencode_document(document: dict[str, Any], *, shell: str | None = None) -> bool:
+    """Update the default model, its provider entry, and the host shell."""
     providers = document.get("providers")
     provider = providers.get("strata") if isinstance(providers, dict) else None
     if not isinstance(provider, dict):
@@ -124,10 +133,16 @@ def configure_opencode_document(document: dict[str, Any]) -> bool:
         raise ValueError("OpenCode config must already contain providers.strata.models")
 
     desired = opencode_model_definition()
-    changed = document.get("model") != MODEL_ID or models.get(MODEL_KEY) != desired
+    selected_shell = shell or preferred_opencode_shell()
+    changed = (
+        document.get("model") != MODEL_ID
+        or models.get(MODEL_KEY) != desired
+        or document.get("shell") != selected_shell
+    )
     if changed:
         models[MODEL_KEY] = desired
         document["model"] = MODEL_ID
+        document["shell"] = selected_shell
     return changed
 
 
@@ -156,6 +171,45 @@ def apply_opencode_default(config_path: Path) -> tuple[bool, Path | None]:
     temporary.write_text(serialized, encoding="utf-8")
     os.replace(temporary, config_path)
     return True, backup_path
+
+
+def install_terminal_runners(repository_root: Path, config_directory: Path) -> list[str]:
+    """Install the bounded Windows and Linux command runners for reuse across projects."""
+    source_directory = repository_root.resolve() / "tools" / "opencode"
+    destination_directory = config_directory.expanduser().resolve() / "scripts"
+    destination_directory.mkdir(parents=True, exist_ok=True)
+    results: list[str] = []
+
+    for name in TERMINAL_RUNNER_FILES:
+        source = source_directory / name
+        if not source.is_file():
+            raise FileNotFoundError(f"missing terminal runner: {source}")
+        destination = destination_directory / name
+        content = source.read_bytes()
+        if destination.is_file() and destination.read_bytes() == content:
+            results.append(f"UNCHANGED {destination}")
+            continue
+
+        if destination.exists():
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            backup = destination.with_name(f"{destination.name}.pre-iq4xs-{stamp}.bak")
+            suffix = 1
+            while backup.exists():
+                backup = destination.with_name(
+                    f"{destination.name}.pre-iq4xs-{stamp}-{suffix}.bak"
+                )
+                suffix += 1
+            shutil.copy2(destination, backup)
+            results.append(f"BACKUP {backup}")
+
+        temporary = destination.with_name(destination.name + ".tmp")
+        temporary.write_bytes(content)
+        os.replace(temporary, destination)
+        if name.endswith(".sh"):
+            destination.chmod(destination.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        results.append(f"INSTALLED {destination}")
+
+    return results
 
 
 def validate_templates(repository_root: Path) -> list[str]:
@@ -251,8 +305,12 @@ def main(argv: list[str] | None = None) -> int:
     render.add_argument("--data-root", type=Path, default=Path.home() / "Strata-data")
     render.add_argument("--output", type=Path, required=True)
 
-    apply = commands.add_parser("apply-opencode", help="set the UD-IQ4_XS OpenCode default")
+    apply = commands.add_parser(
+        "apply-opencode",
+        help="set the UD-IQ4_XS default, select the host shell, and install bounded command runners",
+    )
     apply.add_argument("--config", type=Path, default=_default_opencode_path())
+    apply.add_argument("--repository-root", type=Path, default=Path(__file__).resolve().parents[1])
 
     validate = commands.add_parser("validate-templates", help="check the portable ON/OFF templates")
     validate.add_argument("--repository-root", type=Path, default=Path(__file__).resolve().parents[1])
@@ -280,10 +338,12 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "apply-opencode":
             changed, backup = apply_opencode_default(args.config)
             if changed:
-                print(f"Updated OpenCode default model to {MODEL_ID}")
+                print(f"Updated OpenCode default model and shell ({preferred_opencode_shell()})")
                 print(f"Backup: {backup}")
             else:
-                print(f"Already configured: {MODEL_ID}")
+                print(f"Already configured: {MODEL_ID}; shell={preferred_opencode_shell()}")
+            for result in install_terminal_runners(args.repository_root, args.config.parent):
+                print(result)
         elif args.command == "validate-templates":
             for result in validate_templates(args.repository_root.resolve()):
                 print(result)

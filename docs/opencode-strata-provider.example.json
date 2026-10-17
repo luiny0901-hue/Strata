@@ -1,4 +1,5 @@
 {
+  "shell": "pwsh",
   "model": "strata/qwen3.8-flash-next-unsloth-ud-iq4_xs",
   "agents": {
     "build": {

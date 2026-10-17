@@ -14,6 +14,7 @@ from iq4xs_opencode_setup import (
     SHARD_NAMES,
     apply_opencode_default,
     configure_opencode_document,
+    install_terminal_runners,
     render_profile,
     validate_templates,
     verify_assets,
@@ -101,8 +102,9 @@ class OpenCodeConfigTests(unittest.TestCase):
 
     def test_update_preserves_provider_key_and_other_settings(self) -> None:
         config = self._fixture()
-        self.assertTrue(configure_opencode_document(config))
+        self.assertTrue(configure_opencode_document(config, shell="pwsh"))
         self.assertEqual(config["model"], MODEL_ID)
+        self.assertEqual(config["shell"], "pwsh")
         self.assertEqual(config["providers"]["strata"]["settings"]["apiKey"], "test-only-secret")
         self.assertEqual(config["providers"]["strata"]["models"]["existing-model"]["name"], "preserve me")
         self.assertEqual(config["agents"], {"build": {"steps": 20}})
@@ -113,8 +115,8 @@ class OpenCodeConfigTests(unittest.TestCase):
 
     def test_config_update_is_idempotent(self) -> None:
         config = self._fixture()
-        self.assertTrue(configure_opencode_document(config))
-        self.assertFalse(configure_opencode_document(config))
+        self.assertTrue(configure_opencode_document(config, shell="pwsh"))
+        self.assertFalse(configure_opencode_document(config, shell="pwsh"))
 
     def test_wrong_provider_url_is_rejected_without_mutating_document(self) -> None:
         config = self._fixture()
@@ -138,6 +140,28 @@ class OpenCodeConfigTests(unittest.TestCase):
             self.assertFalse(changed_again)
             self.assertIsNone(backup_again)
             self.assertEqual(len(list(Path(temporary).glob("*.bak"))), 1)
+
+    def test_install_terminal_runners_is_repeatable_and_preserves_neighbors(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            config_directory = base / "opencode"
+            scripts = config_directory / "scripts"
+            scripts.mkdir(parents=True)
+            neighbor = scripts / "my-custom-script.ps1"
+            neighbor.write_text("custom", encoding="utf-8")
+
+            first = install_terminal_runners(ROOT, config_directory)
+            self.assertEqual(len([item for item in first if item.startswith("INSTALLED ")]), 2)
+            for name in ("run_bounded_command.ps1", "run_bounded_command.sh"):
+                self.assertEqual(
+                    (scripts / name).read_bytes(),
+                    (ROOT / "tools" / "opencode" / name).read_bytes(),
+                )
+            self.assertEqual(neighbor.read_text(encoding="utf-8"), "custom")
+
+            second = install_terminal_runners(ROOT, config_directory)
+            self.assertEqual(len([item for item in second if item.startswith("UNCHANGED ")]), 2)
+            self.assertFalse(list(scripts.glob("*.bak")))
 
 
 class AssetManifestTests(unittest.TestCase):
