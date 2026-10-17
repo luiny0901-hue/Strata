@@ -1,0 +1,143 @@
+{
+  "prompt_chars": 85161,
+  "mode": "off",
+  "vision": "gpu",
+  "rows": [
+    {
+      "kind": "warmup",
+      "mode": "off",
+      "vision": "gpu",
+      "label": "WARMUP0000",
+      "image_index": 0,
+      "started_utc": "2026-10-17T08:41:58.110421+00:00",
+      "wall_ms": 18141.3,
+      "http_status": 200,
+      "usage": {
+        "prompt_tokens": 20599,
+        "completion_tokens": 64,
+        "total_tokens": 20663,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 20599,
+        "prompt_ms": 6861.9,
+        "prompt_per_token_ms": 0.333,
+        "prompt_per_second": 3001.9,
+        "predicted_n": 64,
+        "predicted_ms": 629.9,
+        "predicted_per_token_ms": 12.855,
+        "predicted_per_second": 77.8,
+        "draft_n": 40,
+        "draft_n_accepted": 32
+      },
+      "finish_reason": "length",
+      "content_chars": 26,
+      "request_text_chars": 85201
+    },
+    {
+      "kind": "measured",
+      "mode": "off",
+      "vision": "gpu",
+      "label": "MEASURE0001",
+      "image_index": 1,
+      "started_utc": "2026-10-17T08:42:16.253611+00:00",
+      "wall_ms": 16539.3,
+      "http_status": 200,
+      "usage": {
+        "prompt_tokens": 20598,
+        "completion_tokens": 192,
+        "total_tokens": 20790,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 20598,
+        "prompt_ms": 6644.5,
+        "prompt_per_token_ms": 0.323,
+        "prompt_per_second": 3100.0,
+        "predicted_n": 192,
+        "predicted_ms": 1730.1,
+        "predicted_per_token_ms": 9.943,
+        "predicted_per_second": 100.6,
+        "draft_n": 156,
+        "draft_n_accepted": 96
+      },
+      "finish_reason": "length",
+      "content_chars": 190,
+      "request_text_chars": 85201
+    },
+    {
+      "kind": "measured",
+      "mode": "off",
+      "vision": "gpu",
+      "label": "MEASURE0002",
+      "image_index": 2,
+      "started_utc": "2026-10-17T08:42:32.794971+00:00",
+      "wall_ms": 16416.8,
+      "http_status": 200,
+      "usage": {
+        "prompt_tokens": 20598,
+        "completion_tokens": 192,
+        "total_tokens": 20790,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 20598,
+        "prompt_ms": 6595.3,
+        "prompt_per_token_ms": 0.32,
+        "prompt_per_second": 3123.1,
+        "predicted_n": 192,
+        "predicted_ms": 1685.4,
+        "predicted_per_token_ms": 9.686,
+        "predicted_per_second": 103.2,
+        "draft_n": 138,
+        "draft_n_accepted": 87
+      },
+      "finish_reason": "length",
+      "content_chars": 251,
+      "request_text_chars": 85201
+    },
+    {
+      "kind": "measured",
+      "mode": "off",
+      "vision": "gpu",
+      "label": "MEASURE0003",
+      "image_index": 3,
+      "started_utc": "2026-10-17T08:42:49.213923+00:00",
+      "wall_ms": 16533.5,
+      "http_status": 200,
+      "usage": {
+        "prompt_tokens": 20598,
+        "completion_tokens": 192,
+        "total_tokens": 20790,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 20598,
+        "prompt_ms": 6606.3,
+        "prompt_per_token_ms": 0.321,
+        "prompt_per_second": 3117.9,
+        "predicted_n": 192,
+        "predicted_ms": 1789.3,
+        "predicted_per_token_ms": 10.283,
+        "predicted_per_second": 97.2,
+        "draft_n": 143,
+        "draft_n_accepted": 81
+      },
+      "finish_reason": "length",
+      "content_chars": 207,
+      "request_text_chars": 85201
+    }
+  ]
+}

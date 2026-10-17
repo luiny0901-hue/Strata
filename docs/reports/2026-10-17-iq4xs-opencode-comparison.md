@@ -60,3 +60,7 @@ unverified.
 - Raw per-request Strata and OpenCode logs are not committed because they
   include prompts and user workspace details. This report and the independent
   test output files are the shareable evidence.
+
+## Vision CPU/GPU follow-up
+
+A separate same-day 1920x1080 image benchmark compared CPU and GPU vision placement for both uncensored modes. It found no material prefill, decode, or request-wall improvement from GPU vision; see the [follow-up results and per-run evidence](2026-10-17-iq4xs-vision-cpu-gpu/README.md). This separate test does not change the historical no-image result above.

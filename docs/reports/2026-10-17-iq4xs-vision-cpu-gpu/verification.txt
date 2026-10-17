@@ -1,0 +1,23 @@
+Interpreter: existing Strata virtual-environment Python (local absolute path omitted)
+Command: tools/test_iq4xs_opencode_setup.py
+
+test_launchers_bind_iq4xs_and_the_requested_uncensor_mode (__main__.AssetManifestTests.test_launchers_bind_iq4xs_and_the_requested_uncensor_mode) ... ok
+test_manifest_hashes_are_well_formed_and_reference_known_roots (__main__.AssetManifestTests.test_manifest_hashes_are_well_formed_and_reference_known_roots) ... ok
+test_verify_assets_accepts_matching_fixture_hashes (__main__.AssetManifestTests.test_verify_assets_accepts_matching_fixture_hashes) ... ok
+test_verify_assets_rejects_a_wrong_hash (__main__.AssetManifestTests.test_verify_assets_rejects_a_wrong_hash) ... ok
+test_verify_assets_reports_missing_files_without_network_or_gpu (__main__.AssetManifestTests.test_verify_assets_reports_missing_files_without_network_or_gpu) ... ok
+test_both_uncensored_modes_use_the_1024_image_token_budget (__main__.LauncherImageBudgetTests.test_both_uncensored_modes_use_the_1024_image_token_budget) ... ok
+test_config_update_is_idempotent (__main__.OpenCodeConfigTests.test_config_update_is_idempotent) ... ok
+test_file_update_writes_one_backup_then_becomes_noop (__main__.OpenCodeConfigTests.test_file_update_writes_one_backup_then_becomes_noop) ... ok
+test_update_preserves_provider_key_and_other_settings (__main__.OpenCodeConfigTests.test_update_preserves_provider_key_and_other_settings) ... ok
+test_wrong_provider_url_is_rejected_without_mutating_document (__main__.OpenCodeConfigTests.test_wrong_provider_url_is_rejected_without_mutating_document) ... ok
+test_rendered_profiles_use_requested_roots_and_resolve_all_tokens (__main__.ProfileTemplateTests.test_rendered_profiles_use_requested_roots_and_resolve_all_tokens) ... ok
+test_templates_declare_matching_on_and_off_contracts (__main__.ProfileTemplateTests.test_templates_declare_matching_on_and_off_contracts) ... ok
+
+----------------------------------------------------------------------
+Ran 12 tests in 0.057s
+
+OK
+
+Command: -m py_compile tools/iq4xs_opencode_setup.py tools/test_iq4xs_opencode_setup.py
+PY_COMPILE=PASS

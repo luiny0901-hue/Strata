@@ -43,7 +43,7 @@ set "PATH=%ENGINE_DIR%;%PATH%"
 echo Starting Unsloth UD-IQ4_XS through the NVFP4 fork on RTX 3090 Ti GPU 1.
 echo Uncensored mode is OFF; the compatible refusal projection is loaded.
 echo Context cap: 262144. Full 262K context stress was not verified.
-echo Vision encoding uses CPU. The comparison sent no image.
+echo Vision encoder defaults to CPU. See docs/reports/2026-10-17-iq4xs-vision-cpu-gpu-comparison.md
 "%PYTHON%" -m serve.server --engine strata --config "%PROFILE%" --host 127.0.0.1 --port 8080 --image-max-tokens 1024
 set "EXIT_CODE=%ERRORLEVEL%"
 if not "%EXIT_CODE%"=="0" (echo Strata fork server exited with code %EXIT_CODE%.& pause)

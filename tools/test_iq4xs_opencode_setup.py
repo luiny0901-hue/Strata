@@ -34,6 +34,11 @@ class LauncherImageBudgetTests(unittest.TestCase):
                 self.assertEqual(contents.count("--image-max-tokens 1024"), 1)
                 self.assertEqual(contents.count("--image-max-tokens"), 1)
                 self.assertIn(f"render-profile --mode {mode}", contents)
+                self.assertIn("Vision encoder defaults to CPU.", contents)
+                self.assertIn(
+                    "docs/reports/2026-10-17-iq4xs-vision-cpu-gpu-comparison.md",
+                    contents,
+                )
 
 
 class ProfileTemplateTests(unittest.TestCase):
