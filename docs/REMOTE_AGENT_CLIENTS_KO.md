@@ -176,8 +176,12 @@ JetBrains는 ACP 실행 파일을 Rider의 자식 프로세스로 시작하므�
 
 ## CUA와 실제 검증의 경계
 
-Rider, OpenCode, Hermes의 Strata 연결은 모델 API 연결입니다. GUI 조작용 CUA Driver는 별도 클라이언트 로컬 MCP/도구이며 Windows 설정이 Mac으로 자동 전달되지 않습니다. 설정 도구는 CUA Driver를 설치하거나 임의의 MCP 명령을 만들지 않습니다. OpenCode 프로필에는 이미 등록된 `cua-driver_*` 도구를 허용하는 규칙이 있고, Rider ACP의 사용자 지정 MCP 공유를 켜지만, 그 설정만으로 CUA 실행 파일이나 서버가 생기지는 않습니다. CUA Driver의 정확한 배포 패키지와 Windows 설치 확인 절차가 저장소에 없어 Windows도 자동 설치·동작 검증 대상에서 제외했습니다. Apple Silicon macOS 지원은 여전히 확인되지 않았습니다.
+Rider, OpenCode, Hermes의 Strata 연결은 모델 API 연결입니다. GUI 조작용 CUA Driver는 각 클라이언트 PC에서 실행하는 별도 로컬 MCP 도구입니다. 이 설정 도구는 CUA Driver가 없으면 사용자의 동의를 받은 뒤 공식 Windows 또는 macOS 설치기를 실행하고, OpenCode V2 오버레이에 설치된 `cua-driver mcp` 절대 경로를 등록합니다. Windows 설치는 PATH와 자동 시작 작업 변경을 건너뛰며, macOS 설치는 셸 PATH 수정을 건너뜁니다. 이미 설치되어 있으면 재설치 없이 MCP 설정만 연결합니다. 설치기를 거절하거나 설치에 실패해도 Strata 연결 설정은 계속할 수 있으며 CUA 상태를 별도로 표시합니다.
+
+Windows의 OpenCode MCP 프로세스는 자체 런타임을 소유합니다. macOS의 MCP 프로세스는 CuaDriver.app 데몬에 연결하므로 설치 후 로그인 세션에서 데몬이 실행돼 있어야 합니다. 새 설치에서는 앱을 시작해 권한 요청을 열 수 있습니다. 화면 기록과 손쉬운 사용 권한은 macOS System Settings에서 사용자가 직접 승인해야 합니다. 로그아웃·재부팅 후 데몬이 실행 중이 아니면 `open -n -g -a CuaDriver --args serve`로 시작한 뒤 `cua-driver permissions grant`를 실행하세요.
+
+OpenCode 프로필은 등록된 `cua-driver_*` 도구를 허용하고, Rider ACP 항목은 같은 OpenCode 오버레이를 사용하는 wrapper를 실행합니다. `doctor`는 CLI 버전과 MCP 매핑까지만 확인하며 화면 인식, 입력 동작, 실제 Rider 세션 또는 macOS 권한 승인을 증명하지 않습니다. Cua Driver는 macOS 14+ Apple Silicon/Intel, Windows 10/11을 지원한다고 [플랫폼 안내](https://cua.ai/docs/cua-driver)와 [빠른 시작](https://cua.ai/docs/cua-driver/quickstart)에 명시돼 있습니다. 등록은 공식 [에이전트 연결 안내](https://cua.ai/docs/cua-driver/guides/connect-your-agent)와 [OpenCode V2 MCP 설정](https://opencode.ai/v2/docs/mcp-servers/)에 맞췄습니다. 설치는 로컬 CUA Driver만 수행하며 CUA CLI, Spaces, 로그인 또는 전역 skill 설치는 하지 않습니다. CUA Driver의 콘텐츠 없는 제품 telemetry는 기본 활성화라서 원하지 않으면 `cua-driver telemetry disable`을 실행하세요.
 
 Hermes 설정은 OpenCode와 별도입니다. Hermes를 쓰려면 `hermes model`에서 Custom endpoint를 선택하고 도구가 출력한 서버 주소와 `/v1/models`의 정확한 ID를 입력하세요. API 키는 Hermes 자체 비밀 저장 절차를 이용해야 합니다.
 
-클라이언트 도구의 `doctor`는 저장된 URL·모델 ID·키 파일 권한·Rider ACP 등록을 점검합니다. 이것은 API 인증 및 모델 목록 확인이지, 실제 모델 응답·도구 호출·이미지 입력·Rider 대화·Hermes ACP·262K 장기 작업의 증거가 아닙니다. CUA 실행, 화면 인식, Windows/Mac GUI 조작도 검증하지 않습니다. Apple Silicon에서 CUA가 필요하면 해당 CUA 공급자의 macOS 지원을 따로 확인해야 합니다.
+클라이언트 도구의 `doctor`는 저장된 URL·모델 ID·키 파일 권한·Rider ACP·CUA 실행 파일 및 OpenCode MCP 설정을 점검합니다. 이것은 API 인증 및 모델 목록 확인이지, 실제 모델 응답·도구 호출·이미지 입력·Rider 대화·Hermes ACP·262K 장기 작업의 증거가 아닙니다. CUA 화면 인식과 Windows/macOS GUI 조작도 검증하지 않으며, macOS 권한은 운영체제 설정에서 별도 승인해야 합니다.

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Configure and diagnose a client PC that uses a remote Strata server.
 
-This tool configures OpenCode and its JetBrains ACP entry. It never installs or
-starts Strata, changes firewall rules, or installs a CUA Driver.
+This tool configures OpenCode and its JetBrains ACP entry and can install the
+official local Cua Driver for OpenCode. It never installs or starts Strata or
+changes firewall rules.
 """
 
 from __future__ import annotations
@@ -33,6 +34,9 @@ PROVIDER_ID = "strata"
 MODEL_KEY = "server"
 KEY_FILE_RELATIVE = ".config/opencode/strata-client/secrets/STRATA_API_KEY"
 SCHEMA_URL = "https://opencode.ai/config.json"
+CUA_SERVER_ID = "cua-driver"
+CUA_WINDOWS_INSTALLER = "https://cua.ai/driver/install.ps1"
+CUA_MACOS_INSTALLER = "https://cua.ai/driver/install.sh"
 
 
 class SetupError(RuntimeError):
@@ -141,6 +145,7 @@ def build_overlay(
     model: dict[str, Any],
     health: dict[str, Any],
     home: Path,
+    cua_driver: Path | None = None,
 ) -> dict[str, Any]:
     try:
         config = json.loads(PROFILE_FILE.read_text(encoding="utf-8"))
@@ -186,6 +191,17 @@ def build_overlay(
         },
         "models": {MODEL_KEY: model_config},
     }
+    if cua_driver is not None:
+        mcp = config.setdefault("mcp", {})
+        if not isinstance(mcp, dict):
+            raise SetupError("프로필의 mcp 항목은 객체여야 합니다.")
+        servers = mcp.setdefault("servers", {})
+        if not isinstance(servers, dict):
+            raise SetupError("프로필의 mcp.servers 항목은 객체여야 합니다.")
+        servers[CUA_SERVER_ID] = {
+            "type": "local",
+            "command": [str(cua_driver.resolve()), "mcp"],
+        }
     return config
 
 
@@ -298,6 +314,145 @@ def locate_opencode(explicit: str | None) -> Path | None:
     if not path.exists():
         return None
     return path.resolve()
+
+
+def locate_cua_driver(home: Path) -> Path | None:
+    candidates: list[Path] = []
+    for name in ("cua-driver.exe", "cua-driver"):
+        located = shutil.which(name)
+        if located:
+            candidates.append(Path(located))
+    if os.name == "nt":
+        local_app_data = Path(os.environ.get("LOCALAPPDATA", home / "AppData" / "Local"))
+        candidates.extend(
+            [
+                local_app_data / "Programs" / "Cua" / "cua-driver" / "bin" / "cua-driver.exe",
+                local_app_data / "Programs" / "trycua" / "cua-driver-rs" / "bin" / "cua-driver.exe",
+            ]
+        )
+    elif sys.platform == "darwin":
+        candidates.extend(
+            [
+                home / ".local" / "bin" / "cua-driver",
+                Path("/Applications/CuaDriver.app/Contents/MacOS/cua-driver"),
+            ]
+        )
+    for candidate in candidates:
+        try:
+            if candidate.is_file():
+                return candidate.resolve()
+        except OSError:
+            continue
+    return None
+
+
+def download_official_installer(url: str, destination: Path) -> None:
+    request = urllib.request.Request(url, headers={"User-Agent": "Lustra-remote-agent-setup"})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            final_url = urllib.parse.urlsplit(response.geturl())
+            if final_url.scheme != "https":
+                raise SetupError("공식 CUA 설치기 다운로드가 HTTPS 연결을 유지하지 않아 중단했습니다.")
+            installer = response.read(2_000_001)
+    except urllib.error.URLError as exc:
+        raise SetupError(f"공식 CUA 설치기를 다운로드하지 못했습니다: {exc}") from None
+    except (TimeoutError, OSError) as exc:
+        raise SetupError(f"공식 CUA 설치기 다운로드 중 오류가 발생했습니다: {exc}") from None
+    if not installer or len(installer) > 2_000_000:
+        raise SetupError("CUA 설치기 크기가 비어 있거나 예상 한도보다 커서 실행하지 않았습니다.")
+    destination.write_bytes(installer)
+
+
+def install_cua_driver(home: Path) -> Path:
+    if os.name == "nt":
+        installer_url = CUA_WINDOWS_INSTALLER
+        powershell = shutil.which("powershell.exe") or shutil.which("powershell")
+        if not powershell:
+            raise SetupError("Windows PowerShell을 찾을 수 없어 CUA를 설치하지 않았습니다.")
+    elif sys.platform == "darwin":
+        installer_url = CUA_MACOS_INSTALLER
+        powershell = None
+    else:
+        raise SetupError("이 설치 도우미는 Windows와 macOS CUA 설치만 지원합니다.")
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="cua-driver-installer-") as temporary_dir:
+            installer_path = Path(temporary_dir) / ("install.ps1" if os.name == "nt" else "install.sh")
+            download_official_installer(installer_url, installer_path)
+            if os.name == "nt":
+                command = [
+                    str(powershell),
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(installer_path),
+                    "-NoPathUpdate",
+                    "-NoAutoStart",
+                ]
+            else:
+                command = ["/bin/bash", str(installer_path), "--no-modify-path"]
+            result = subprocess.run(command, check=False, timeout=1200)
+    except subprocess.TimeoutExpired:
+        raise SetupError("CUA 설치가 20분 안에 끝나지 않았습니다. 설치 결과를 확인한 뒤 다시 실행하세요.") from None
+    except OSError as exc:
+        raise SetupError(f"CUA 설치기를 실행하지 못했습니다: {exc}") from None
+    if result.returncode != 0:
+        raise SetupError(f"공식 CUA 설치기가 종료 코드 {result.returncode}를 반환했습니다.")
+    driver = locate_cua_driver(home)
+    if driver is None:
+        raise SetupError("설치기는 완료됐지만 cua-driver 실행 파일을 찾지 못했습니다.")
+    return driver
+
+
+def ensure_cua_driver(home: Path) -> tuple[Path | None, str]:
+    existing = locate_cua_driver(home)
+    if sys.platform == "darwin" and not Path("/Applications/CuaDriver.app").is_dir():
+        # The macOS MCP transport delegates to the signed app daemon so TCC
+        # grants attach to the correct application identity.
+        existing = None
+    if existing is not None:
+        return existing, "already-installed"
+    if os.name != "nt" and sys.platform != "darwin":
+        return None, "unsupported-platform"
+
+    print("CUA Driver는 화면을 보고 마우스·키보드 입력을 수행할 수 있는 로컬 도구입니다.")
+    print("OpenCode 프로필은 등록 후 CUA 도구를 허용합니다. macOS 시스템 권한을 승인하면 앱 화면을 조작할 수 있습니다.")
+    print("CUA Driver는 콘텐츠 없는 사용 telemetry를 기본 전송하며, 설치 후 'cua-driver telemetry disable'로 끌 수 있습니다.")
+    print("공식 설치기를 내려받아 현재 사용자 범위에 설치합니다. 관리자 권한은 요청하지 않습니다.")
+    if input("지금 CUA Driver를 설치하고 OpenCode에 등록할까요? [Y/n]: ").strip().lower() in ("n", "no"):
+        return None, "declined"
+    try:
+        driver = install_cua_driver(home)
+    except SetupError as exc:
+        # Keep remote Strata setup usable even if the independent CUA install
+        # cannot complete; report the CUA state explicitly in setup output.
+        print(f"CUA 설치 실패: {exc}")
+        partial_install = locate_cua_driver(home)
+        if partial_install is None:
+            return None, "install-failed"
+        return partial_install, "install-warning"
+    return driver, "installed"
+
+
+def start_new_macos_cua_install(driver: Path) -> bool:
+    """Start the permission-owning app after a fresh install; user grants remain manual."""
+    open_command = shutil.which("open")
+    if not open_command:
+        return False
+    try:
+        opened = subprocess.run(
+            [open_command, "-n", "-g", "-a", "CuaDriver", "--args", "serve"],
+            check=False,
+            timeout=15,
+        )
+        if opened.returncode != 0:
+            return False
+        grant = subprocess.run([str(driver), "permissions", "grant"], check=False, timeout=60)
+        return grant.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
 
 
 def opencode_version(executable: Path) -> str:
@@ -437,11 +592,13 @@ def write_setup(
     model: dict[str, Any],
     opencode: Path,
     version: str,
+    cua_driver: Path | None,
+    cua_status: str,
 ) -> str:
     acp = acp_path(home)
     # Validate existing ACP before writing any local client configuration.
     load_acp(acp)
-    config = build_overlay(base_url, model, health, home)
+    config = build_overlay(base_url, model, health, home, cua_driver)
     encoded_overlay = (json.dumps(config, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
     # Validate all generated state before touching the credential or ACP file.
@@ -470,6 +627,8 @@ def write_setup(
         "acp_config": str(acp),
         "acp_agent": agent_name,
         "launcher": str(wrapper),
+        "cua_driver_executable": str(cua_driver) if cua_driver else None,
+        "cua_driver_setup_status": cua_status,
     }
     atomic_write(state_path(home), (json.dumps(state, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
     return agent_name
@@ -513,7 +672,13 @@ def do_setup(args: argparse.Namespace) -> int:
         key = getpass.getpass("저장된 키가 거부되었습니다. 새 Strata API 키: ").strip()
         health, models = fetch_server_profile(base_url, key)
     model = choose_model(models)
-    agent = write_setup(home, base_url, key, health, model, opencode, version)
+    cua_driver, cua_status = ensure_cua_driver(home)
+    agent = write_setup(home, base_url, key, health, model, opencode, version, cua_driver, cua_status)
+    if cua_driver is not None and sys.platform == "darwin" and cua_status == "installed":
+        if start_new_macos_cua_install(cua_driver):
+            print("CUA Driver 앱을 시작했습니다. macOS 시스템 설정에서 화면 기록과 손쉬운 사용 권한을 승인하세요.")
+        else:
+            print("CUA Driver는 설치됐지만 macOS 앱/권한 요청을 시작하지 못했습니다.")
 
     loaded = "loaded" if health.get("loaded") is True else "모델 미로드 (서버는 응답함)"
     context = health.get("max_context") or "서버가 보고하지 않음"
@@ -524,8 +689,23 @@ def do_setup(args: argparse.Namespace) -> int:
     print(f"  API 키: {key_path(home)} (내용은 출력하거나 설정 JSON에 저장하지 않음)")
     print(f"  OpenCode 실행: {client_dir(home) / 'bin' / ('opencode-strata.ps1' if os.name == 'nt' else 'opencode-strata')}")
     print(f"  Rider: IDE를 재시작하고 ACP agent '{agent}'를 선택하세요.")
-    print("  CUA Driver: 기존 로컬 MCP를 자동 설치하지 않습니다. Rider의 custom MCP 공유는 켰습니다.")
-    print("  macOS CUA 지원: 이 저장소에서 검증되지 않았습니다.")
+    if cua_driver is not None:
+        print(f"  CUA Driver: OpenCode MCP에 등록됨 ({cua_driver})")
+        if cua_status == "install-warning":
+            print("  CUA 설치기는 오류를 반환했지만 실행 파일이 발견되어 MCP 연결을 구성했습니다. doctor로 확인하세요.")
+        if os.name == "nt":
+            print(
+                "  CUA 사용: 새 OpenCode 세션에서 MCP 도구가 시작됩니다. "
+                "Rider도 ACP를 통해 같은 OpenCode 설정을 사용합니다."
+            )
+        elif sys.platform == "darwin":
+            print("  CUA 사용: CuaDriver.app 데몬이 로그인 세션에서 실행 중이어야 합니다. 화면 기록·손쉬운 사용 권한은 직접 승인하세요.")
+    elif cua_status == "unsupported-platform":
+        print("  CUA Driver: 이 설정 도우미는 Windows/macOS에서만 자동 설치합니다.")
+    elif cua_status == "declined":
+        print("  CUA Driver: 설치를 건너뛰었습니다. setup을 다시 실행하면 설치할 수 있습니다.")
+    else:
+        print("  CUA Driver: 설치 또는 실행 파일 확인에 실패해 OpenCode MCP에 등록되지 않았습니다.")
     print("  Hermes: 별도 설정입니다. 'hermes model'에서 Custom endpoint를 선택하세요.")
     doctor_command = (
         f"& {_powershell_literal(str(REPO_ROOT / 'tools' / 'remote_agent_client' / 'setup-windows.bat'))} doctor"
@@ -645,8 +825,53 @@ def do_doctor(args: argparse.Namespace) -> int:
         print(f"FAIL Rider ACP: {exc}")
         failures += 1
 
-    print("UNVERIFIED CUA Driver: 이 도구는 설치/실행/시각 동작을 검사하지 않습니다.")
-    print("UNVERIFIED macOS CUA support: 별도 CUA 공급자의 Apple Silicon 지원 증거가 필요합니다.")
+    cua_executable_value = state.get("cua_driver_executable")
+    if not isinstance(cua_executable_value, str) or not cua_executable_value:
+        print("NOT_CONFIGURED CUA Driver: setup을 다시 실행해 설치 및 OpenCode MCP 등록을 선택할 수 있습니다.")
+    else:
+        cua_executable = Path(cua_executable_value)
+        mcp = config.get("mcp")
+        mcp_servers = mcp.get("servers") if isinstance(mcp, dict) else None
+        cua_entry = mcp_servers.get(CUA_SERVER_ID) if isinstance(mcp_servers, dict) else None
+        expected_command = [str(cua_executable), "mcp"]
+        if not cua_executable.is_file():
+            print(f"FAIL CUA Driver 실행 파일을 찾을 수 없습니다: {cua_executable}")
+            failures += 1
+        elif (
+            not isinstance(cua_entry, dict)
+            or cua_entry.get("type") != "local"
+            or cua_entry.get("command") != expected_command
+            or cua_entry.get("disabled") is True
+        ):
+            print("FAIL OpenCode overlay에 CUA Driver MCP 명령이 영수증과 일치하게 등록되지 않았습니다.")
+            failures += 1
+        else:
+            try:
+                cua_version = subprocess.run(
+                    [str(cua_executable), "--version"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                )
+                version_text = (cua_version.stdout or cua_version.stderr).strip().splitlines()
+                if cua_version.returncode == 0 and version_text:
+                    print(f"PASS CUA Driver 설치 및 OpenCode MCP 등록: {version_text[0]}")
+                else:
+                    print("FAIL CUA Driver 버전 확인에 실패했습니다.")
+                    failures += 1
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                print(f"FAIL CUA Driver 실행 확인: {exc}")
+                failures += 1
+            if sys.platform == "darwin":
+                if Path("/Applications/CuaDriver.app").is_dir():
+                    print("PASS macOS CuaDriver.app 번들 존재")
+                else:
+                    print("FAIL macOS CuaDriver.app 번들이 없습니다.")
+                    failures += 1
+                print("UNVERIFIED macOS CuaDriver.app 데몬 및 손쉬운 사용/화면 기록 권한; System Settings에서 확인하세요.")
+            else:
+                print("UNVERIFIED 실제 화면 인식·마우스·키보드 동작; 이 진단은 GUI 상호작용을 수행하지 않습니다.")
     print("NOT_RUN Hermes ACP: Hermes는 OpenCode와 별도 설정입니다.")
     return 1 if failures else 0
 
