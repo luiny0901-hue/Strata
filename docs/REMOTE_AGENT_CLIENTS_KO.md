@@ -1,6 +1,30 @@
-# Windows Strata를 Rider와 Hermes에서 사용하기
+# Windows Strata를 OpenCode, Rider, Hermes에서 사용하기
 
 이 안내서는 Windows에서 실행하는 Strata API를 Windows 또는 macOS의 OpenCode, Rider, Hermes에서 사용하는 방법을 정리합니다. 모델 실행 파일과 모델 데이터는 Strata 호스트에만 둡니다. macOS 클라이언트가 이 Windows CUDA/NVFP4 실행 파일을 직접 실행하는 구성은 아닙니다.
+
+## 새 클라이언트 PC 빠른 설정
+
+Strata 서버가 신뢰 가능한 LAN 또는 Tailscale에서 실행 중이고 API 키가 준비되면, 클라이언트 PC에서 이 저장소를 받은 뒤 한 번 실행합니다.
+
+```powershell
+# Windows PowerShell (setup 실행 정책 변경 없이 실행)
+git clone --depth 1 --branch feature/opencode-agent-workflow https://github.com/luiny0901-hue/Strata.git Strata-client-setup
+cd Strata-client-setup
+.\tools\remote_agent_client\setup-windows.bat setup
+```
+
+```sh
+# Apple Silicon Mac 터미널
+git clone --depth 1 --branch feature/opencode-agent-workflow https://github.com/luiny0901-hue/Strata.git Strata-client-setup
+cd Strata-client-setup
+sh tools/remote_agent_client/setup-macos.sh setup
+```
+
+설정 도구가 서버 URL과 API 키를 묻고, `/health`와 인증된 `/v1/models`에서 실제 모델 ID와 context/image 상태를 읽어 OpenCode V2 설정을 만듭니다. API 키는 입력할 때 화면에 표시하지 않고 이 클라이언트 전용 사용자 설정 폴더에 저장합니다. OpenCode의 기존 전역 설정은 덮어쓰지 않고, `OPENCODE_CONFIG` 오버레이를 통해 기존 설정에 원격 Strata provider를 추가합니다. OpenCode 설정은 여러 위치의 값을 병합하므로 겹치지 않는 전역·프로젝트 설정은 그대로 적용됩니다. [OpenCode V2 설정 병합·오버레이 안내](https://dev.opencode.ai/v2/docs/config/)
+
+도구는 OpenCode 실행용 wrapper와 Rider ACP 항목을 추가하고, 기존 `~/.jetbrains/acp.json`에 다른 agent가 있으면 보존합니다. 설정 후 Rider를 재시작하고 AI Chat에서 **OpenCode Strata** agent를 고르세요. 터미널에서는 Windows PowerShell의 생성된 `opencode-strata.ps1` 또는 Mac의 `opencode-strata` wrapper를 실행합니다. 상태 재점검은 같은 스크립트에 `doctor`를 전달합니다.
+
+이 문서의 clone URL은 이 설정 작업이 들어간 사용자 저장소 branch입니다. 변경이 공식 저장소에 반영되면 공식 `main` 안내로 갱신할 수 있습니다. 이 도구는 OpenCode나 Rider를 설치하지 않고, Strata 서버·방화벽·Tailscale 설정도 변경하지 않습니다. Python 3와 OpenCode V2 CLI가 클라이언트 PC에 있어야 합니다. 자세한 생성 파일, 백업, 복구 방법은 [클라이언트 설정 도구 안내](../tools/remote_agent_client/README_KO.md)를 참고하세요.
 
 ## 현재 구성에서 확인된 경계
 
@@ -26,13 +50,13 @@ Hermes는 Windows 10/11과 Apple Silicon macOS를 공식 지원 대상으로 안
 
 Strata API는 여기서 일반 HTTP로 연결됩니다. 인터넷에 포트 포워딩하거나 공개 네트워크에 직접 노출하지 마세요. Tailscale 밖의 신뢰할 수 없는 네트워크에서는 이 설정을 사용하지 마세요.
 
-API 키는 서버 호스트의 `%USERPROFILE%\.config\strata\STRATA_API_KEY`에 저장되어 있습니다. 키 값을 저장소, 채팅, 커밋된 설정에 넣지 마세요. 각 클라이언트 기기의 비밀 저장 위치에 키를 따로 입력해야 합니다. macOS 키 파일은 `chmod 600 ~/.config/strata/STRATA_API_KEY`로 사용자만 읽도록 제한하세요.
+API 키는 서버 호스트의 `%USERPROFILE%\.config\strata\STRATA_API_KEY`에 저장되어 있습니다. 키 값을 저장소, 채팅, 커밋된 설정에 넣지 마세요. 각 클라이언트 기기의 비밀 저장 위치에 키를 따로 입력해야 합니다. 빠른 설정 도구는 클라이언트의 `~/.config/opencode/strata-client/secrets/STRATA_API_KEY`에 키를 저장하고 권한을 제한합니다. 수동 설정을 한다면 macOS 키 파일은 `chmod 600`으로 사용자만 읽도록 제한하세요.
 
 ## OpenCode와 Rider 연결
 
 Rider는 ACP를 통해 **로컬에 설치된 OpenCode**를 시작합니다. Strata 주소와 모델은 그 Windows/Mac의 OpenCode 설정에 둡니다. JetBrains ACP 설정 파일은 각 사용자 홈의 `~/.jetbrains/acp.json`이며 `command`는 해당 기기에 설치된 실행 파일의 절대 경로여야 합니다. Windows의 `C:\Users\...\opencode.exe` 경로를 Mac에 복사하면 작동하지 않습니다. [OpenCode ACP 안내](https://docs.opencode.ai/docs/acp/)
 
-현재 OpenCode V2의 `providers` 형식 예시입니다. `<STRATA_HOST>`를 위 표의 주소로 바꾸고, 모델 ID는 서버의 `/v1/models` 응답에서 복사하세요. 이 예시의 `apiKey`는 키 값이 아니라 클라이언트의 키 파일을 읽는 참조입니다. V2 provider/model 설정 방식은 [OpenCode V2 Providers](https://opencode.ai/v2/docs/providers)와 [OpenCode Config](https://docs.opencode.ai/docs/config/)를 기준으로 했습니다.
+현재 OpenCode V2의 `providers` 형식 예시입니다. `<STRATA_HOST>`를 위 표의 주소로 바꾸고, 모델 ID는 서버의 `/v1/models` 응답에서 복사하세요. 이 예시의 `apiKey`는 키 값이 아니라 클라이언트의 키 파일을 읽는 참조입니다. V2 provider/model 설정 방식은 [OpenCode V2 Providers](https://opencode.ai/v2/docs/providers/)와 [OpenCode V2 Config](https://dev.opencode.ai/v2/docs/config/)를 기준으로 했습니다.
 
 ```jsonc
 {
@@ -152,6 +176,8 @@ JetBrains는 ACP 실행 파일을 Rider의 자식 프로세스로 시작하므�
 
 ## CUA와 실제 검증의 경계
 
-Rider, OpenCode, Hermes의 Strata 연결은 모델 API 연결입니다. GUI 조작용 CUA Driver는 별도 로컬 MCP/도구이며 Windows 설정이 Mac으로 자동 전달되지 않습니다. 이 저장소의 현재 CUA Driver가 macOS에서 지원되는지는 확인되지 않았습니다.
+Rider, OpenCode, Hermes의 Strata 연결은 모델 API 연결입니다. GUI 조작용 CUA Driver는 별도 클라이언트 로컬 MCP/도구이며 Windows 설정이 Mac으로 자동 전달되지 않습니다. 설정 도구는 CUA Driver를 설치하거나 임의의 MCP 명령을 만들지 않습니다. OpenCode 프로필에는 이미 등록된 `cua-driver_*` 도구를 허용하는 규칙이 있고, Rider ACP의 사용자 지정 MCP 공유를 켜지만, 그 설정만으로 CUA 실행 파일이나 서버가 생기지는 않습니다. CUA Driver의 정확한 배포 패키지와 Windows 설치 확인 절차가 저장소에 없어 Windows도 자동 설치·동작 검증 대상에서 제외했습니다. Apple Silicon macOS 지원은 여전히 확인되지 않았습니다.
 
-이 문서는 설정 경로와 계약만 정리합니다. 실제 Windows/Mac 네트워크 연결, `/health`, `/v1/models`, 도구 호출, 이미지 입력, Rider 대화, Hermes ACP, 262K 장기 작업은 실행하지 않았으며 모두 사용자가 별도로 검증해야 합니다.
+Hermes 설정은 OpenCode와 별도입니다. Hermes를 쓰려면 `hermes model`에서 Custom endpoint를 선택하고 도구가 출력한 서버 주소와 `/v1/models`의 정확한 ID를 입력하세요. API 키는 Hermes 자체 비밀 저장 절차를 이용해야 합니다.
+
+클라이언트 도구의 `doctor`는 저장된 URL·모델 ID·키 파일 권한·Rider ACP 등록을 점검합니다. 이것은 API 인증 및 모델 목록 확인이지, 실제 모델 응답·도구 호출·이미지 입력·Rider 대화·Hermes ACP·262K 장기 작업의 증거가 아닙니다. CUA 실행, 화면 인식, Windows/Mac GUI 조작도 검증하지 않습니다. Apple Silicon에서 CUA가 필요하면 해당 CUA 공급자의 macOS 지원을 따로 확인해야 합니다.
