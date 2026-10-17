@@ -23,6 +23,19 @@ from iq4xs_opencode_setup import (
 ROOT = Path(__file__).resolve().parents[1]
 
 
+class LauncherImageBudgetTests(unittest.TestCase):
+    def test_both_uncensored_modes_use_the_1024_image_token_budget(self) -> None:
+        for mode in ("off", "on"):
+            with self.subTest(mode=mode):
+                launcher = (
+                    ROOT / f"run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-{mode}.bat"
+                )
+                contents = launcher.read_text(encoding="utf-8")
+                self.assertEqual(contents.count("--image-max-tokens 1024"), 1)
+                self.assertEqual(contents.count("--image-max-tokens"), 1)
+                self.assertIn(f"render-profile --mode {mode}", contents)
+
+
 class ProfileTemplateTests(unittest.TestCase):
     def test_templates_declare_matching_on_and_off_contracts(self) -> None:
         self.assertEqual(
