@@ -94,7 +94,7 @@ foreach ($candidate in $enabledAllows) {
 
 $blockRule = Get-NetFirewallRule -Name $blockRuleName -ErrorAction SilentlyContinue
 if ($blockRule) {
-    Set-NetFirewallRule -Name $blockRuleName -DisplayName 'Strata OpenCode API - Block Domain and Public networks' `
+    Set-NetFirewallRule -Name $blockRuleName -NewDisplayName 'Strata OpenCode API - Block Domain and Public networks' `
         -Description 'Prevents Strata API access on Domain/Public network profiles.' -Direction Inbound -Action Block `
         -Enabled True -Profile Domain,Public -Protocol TCP -LocalPort 8080 -RemoteAddress Any -EdgeTraversalPolicy Block
     $blockRule = Get-NetFirewallRule -Name $blockRuleName
@@ -122,7 +122,7 @@ foreach ($legacyRule in $legacyRulesToRestrict) {
 
 $allowRule = Get-NetFirewallRule -Name $allowRuleName -ErrorAction SilentlyContinue
 if ($allowRule) {
-    Set-NetFirewallRule -Name $allowRuleName -DisplayName $displayName `
+    Set-NetFirewallRule -Name $allowRuleName -NewDisplayName $displayName `
         -Description 'Allows authenticated Strata API access only from directly connected local subnets on Private networks.' `
         -Direction Inbound -Action Allow -Enabled True -Profile Private -Protocol TCP -LocalPort 8080 `
         -RemoteAddress LocalSubnet -EdgeTraversalPolicy Block
