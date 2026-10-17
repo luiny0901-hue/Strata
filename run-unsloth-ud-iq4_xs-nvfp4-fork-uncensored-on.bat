@@ -12,6 +12,19 @@ set "PROFILE_DIR=%LOCALAPPDATA%\Strata\profiles"
 set "PROFILE=%PROFILE_DIR%\strata-unsloth-ud-iq4_xs-nvfp4fork-uncensored-on.json"
 set "PYTHON=%STRATA_ROOT%.venv\Scripts\python.exe"
 set "VECTOR=%FORK_ROOT%\data\uncensor\qwen-nvfp4-gptq-uncensored.gguf"
+set "API_KEY_FILE=%USERPROFILE%\.config\strata\STRATA_API_KEY"
+
+if not exist "%API_KEY_FILE%" (echo Strata API key file is missing. Run configure_strata_api_key.ps1 -Generate from the setup checkout.& pause& exit /b 21)
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$p=$env:USERPROFILE + '\.config\strata\STRATA_API_KEY'; $k=[IO.File]::ReadAllText($p); if ($k -cnotmatch '^[0-9a-fA-F]{64}$') { exit 1 }"
+if errorlevel 1 (echo Strata API key file is malformed. No server was started.& pause& exit /b 22)
+set "STRATA_API_KEY="
+for /f "usebackq delims=" %%K in ("%API_KEY_FILE%") do set "STRATA_API_KEY=%%K"
+if not defined STRATA_API_KEY (echo Strata API key file is empty. No server was started.& pause& exit /b 23)
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$p=@(Get-NetConnectionProfile -ErrorAction Stop | Where-Object { $_.IPv4Connectivity -ne 'Disconnected' }); $f=@(Get-NetFirewallProfile -ErrorAction Stop); if (-not $p -or -not ($p | Where-Object NetworkCategory -eq 'Private') -or ($p | Where-Object NetworkCategory -eq 'Public') -or ($f | Where-Object { -not $_.Enabled })) { exit 1 }"
+if errorlevel 1 (echo LAN startup requires an active Private network, no Public network, and Windows Firewall enabled for every profile.& pause& exit /b 24)
+powershell -NoProfile -ExecutionPolicy Bypass -File "%STRATA_ROOT%tools\windows\check_strata_lan_firewall.ps1"
+if errorlevel 1 (echo Port 8080 firewall scope is missing or too broad. Run tools\windows\allow_strata_lan.ps1 in an elevated PowerShell, then retry.& pause& exit /b 25)
 
 if not exist "%PYTHON%" (echo Strata Python environment is missing: "%PYTHON%"& pause& exit /b 2)
 if not exist "%ENGINE_DIR%\strata.exe" (echo NVFP4 fork engine is missing.& pause& exit /b 3)
@@ -41,10 +54,12 @@ if errorlevel 1 (echo Port 8080 is occupied or could not be checked. No process 
 cd /d "%FORK_ROOT%" || (echo Could not enter the NVFP4 fork directory.& pause& exit /b 20)
 set "PATH=%ENGINE_DIR%;%PATH%"
 echo Starting Unsloth UD-IQ4_XS through the NVFP4 fork on RTX 3090 Ti GPU 1.
+echo LAN API bind is enabled; authentication is required. Use only a trusted Private network.
+echo If remote clients are blocked, install the Private/LocalSubnet rule from the setup checkout's tools\windows\allow_strata_lan.ps1.
 echo Uncensored mode is ON; the compatible refusal projection is loaded.
 echo Context cap: 262144. Full 262K context stress was not verified.
 echo Vision encoder defaults to CPU. See docs/reports/2026-10-17-iq4xs-vision-cpu-gpu-comparison.md
-"%PYTHON%" -m serve.server --engine strata --config "%PROFILE%" --host 127.0.0.1 --port 8080 --image-max-tokens 1024
+"%PYTHON%" -m serve.server --engine strata --config "%PROFILE%" --host 0.0.0.0 --port 8080 --image-max-tokens 1024
 set "EXIT_CODE=%ERRORLEVEL%"
 if not "%EXIT_CODE%"=="0" (echo Strata fork server exited with code %EXIT_CODE%.& pause)
 exit /b %EXIT_CODE%

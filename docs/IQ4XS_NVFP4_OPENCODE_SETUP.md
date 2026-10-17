@@ -4,6 +4,11 @@ This opt-in Windows setup uses the user's NVFP4 fork build with Unsloth
 UD-IQ4_XS as the OpenCode default. It does not change Strata's installer,
 include model weights or fork binaries, or store an OpenCode API key.
 
+To use this Windows host from another Windows PC or Apple Silicon Mac, follow
+[REMOTE_WINDOWS_MAC_SETUP.md](REMOTE_WINDOWS_MAC_SETUP.md). It keeps the model
+on the host, requires an API key, scopes Windows Firewall to a Private local
+subnet, and installs CUA Driver locally on each OpenCode client.
+
 ## Restore after reinstalling Windows
 
 1. Clone the account fork and check out this setup branch:

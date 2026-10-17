@@ -6,6 +6,7 @@ import base64
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -106,8 +107,8 @@ class WindowsCommandRunnerTests(unittest.TestCase):
 class LinuxCommandRunnerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        if os.name == "nt":
-            raise unittest.SkipTest("Linux runner tests require Linux")
+        if sys.platform != "linux":
+            raise unittest.SkipTest("process-group and /proc fixtures require Linux")
         if not shutil.which("timeout"):
             raise unittest.SkipTest("GNU timeout is not installed")
 

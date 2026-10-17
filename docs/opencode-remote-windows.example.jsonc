@@ -1,0 +1,77 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "strata/qwen3.8-flash-next-unsloth-ud-iq4_xs",
+  "default_agent": "build",
+  "agents": {
+    "build": { "steps": 100 }
+  },
+  "shell": "pwsh",
+  "permissions": [
+    { "action": "doom_loop", "resource": "*", "effect": "deny" },
+    { "action": "external_directory", "resource": "*", "effect": "ask" },
+    { "action": "cua-driver_*", "resource": "*", "effect": "allow" }
+  ],
+  "compaction": {
+    "auto": true,
+    "keep": { "tokens": 20000 },
+    "buffer": 32768
+  },
+  "instructions": ["~/.config/opencode/KOREAN_INSTRUCTIONS.md"],
+  "providers": {
+    "strata": {
+      "name": "Strata LAN host",
+      "package": "@opencode/ai/providers/openai-compatible",
+      "settings": {
+        "baseURL": "http://STRATA_HOST_LAN_IP:8080/v1",
+        "apiKey": "{file:~/.config/strata/STRATA_API_KEY}"
+      },
+      "models": {
+        "orcarouter-qwen3.8-flash-next-uncensored-iq4_xs-3090ti-pr1904-async-pr1905": {
+          "name": "Qwen3.8 Flash Next (Strata)",
+          "capabilities": { "tools": true, "input": ["text", "image"], "output": ["text"] },
+          "limit": { "context": 262144, "output": 32000 },
+          "variants": [
+            { "id": "low", "body": { "reasoning_effort": "low" } },
+            { "id": "medium", "body": { "reasoning_effort": "medium" } },
+            { "id": "high", "body": { "reasoning_effort": "high" } },
+            { "id": "xhigh", "body": { "reasoning_effort": "xhigh" } }
+          ]
+        },
+        "qwen3.8-flash-next-unsloth-ud-iq4_xs": {
+          "name": "Qwen3.8 Flash Next Unsloth UD-IQ4_XS (NVFP4 fork)",
+          "capabilities": { "tools": true, "input": ["text", "image"], "output": ["text"] },
+          "limit": { "context": 262144, "output": 32000 },
+          "variants": [
+            { "id": "low", "body": { "reasoning_effort": "low" } },
+            { "id": "medium", "body": { "reasoning_effort": "medium" } },
+            { "id": "high", "body": { "reasoning_effort": "high" } },
+            { "id": "xhigh", "body": { "reasoning_effort": "xhigh" } }
+          ]
+        },
+        "qwen3.8-flash-next-unsloth-ud-q4_k_xl": {
+          "name": "Qwen3.8 Flash Next Unsloth UD-Q4_K_XL (NVFP4 fork)",
+          "capabilities": { "tools": true, "input": ["text", "image"], "output": ["text"] },
+          "limit": { "context": 262144, "output": 32000 },
+          "variants": [
+            { "id": "low", "body": { "reasoning_effort": "low" } },
+            { "id": "medium", "body": { "reasoning_effort": "medium" } },
+            { "id": "high", "body": { "reasoning_effort": "high" } },
+            { "id": "xhigh", "body": { "reasoning_effort": "xhigh" } }
+          ]
+        }
+      }
+    }
+  },
+  "watcher": {
+    "ignore": ["**/Binaries/**", "**/Intermediate/**", "**/DerivedDataCache/**", "**/Library/**"]
+  },
+  "mcp": {
+    "servers": {
+      "cua-driver": {
+        "type": "local",
+        "command": ["cua-driver", "mcp"],
+        "codemode": false
+      }
+    }
+  }
+}

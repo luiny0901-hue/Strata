@@ -36,6 +36,8 @@ class LauncherImageBudgetTests(unittest.TestCase):
                 self.assertEqual(contents.count("--image-max-tokens"), 1)
                 self.assertIn(f"render-profile --mode {mode}", contents)
                 self.assertIn("Vision encoder defaults to CPU.", contents)
+                self.assertIn("check_strata_lan_firewall.ps1", contents)
+                self.assertIn("exit /b 25", contents)
                 self.assertIn(
                     "docs/reports/2026-10-17-iq4xs-vision-cpu-gpu-comparison.md",
                     contents,
@@ -274,6 +276,8 @@ class AssetManifestTests(unittest.TestCase):
             self.assertIn("no process was stopped", content)
             self.assertNotRegex(content, r"taskkill|stop-process")
             self.assertNotIn("q4_k_xl", content)
+            self.assertIn("check_strata_lan_firewall.ps1", content)
+            self.assertIn("exit /b 25", content)
             template = ROOT / f"profiles/strata-unsloth-ud-iq4_xs-nvfp4fork-uncensored-{mode}.json.template"
             profile = json.loads(template.read_text(encoding="utf-8"))
             self.assertIs(profile["uncensored"], mode == "on")

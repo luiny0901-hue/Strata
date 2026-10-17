@@ -1,5 +1,4 @@
 {
-  "shell": "pwsh",
   "model": "strata/qwen3.8-flash-next-unsloth-ud-iq4_xs",
   "agents": {
     "build": {
@@ -18,11 +17,11 @@
   ],
   "providers": {
     "strata": {
-      "name": "Strata local",
+      "name": "Strata LAN host",
       "package": "@opencode/ai/providers/openai-compatible",
       "settings": {
-        "baseURL": "http://127.0.0.1:8080/v1",
-        "apiKey": "REPLACE_LOCALLY"
+        "baseURL": "http://STRATA_HOST_LAN_IP:8080/v1",
+        "apiKey": "{file:~/.config/strata/STRATA_API_KEY}"
       },
       "models": {
         "qwen3.8-flash-next-unsloth-ud-iq4_xs": {
