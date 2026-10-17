@@ -33,6 +33,8 @@ td.log
 /packs/
 /mtp/
 /run-*.bat
+!/run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-on.bat
+!/run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-off.bat
 /run-*.sh
 /strata-*.json
 /strata-*.log

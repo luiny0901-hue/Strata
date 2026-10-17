@@ -1,0 +1,33 @@
+{
+  "model": "strata/qwen3.8-flash-next-unsloth-ud-iq4_xs",
+  "providers": {
+    "strata": {
+      "name": "Strata local",
+      "package": "@opencode/ai/providers/openai-compatible",
+      "settings": {
+        "baseURL": "http://127.0.0.1:8080/v1",
+        "apiKey": "REPLACE_LOCALLY"
+      },
+      "models": {
+        "qwen3.8-flash-next-unsloth-ud-iq4_xs": {
+          "name": "Qwen3.8 Flash Next Unsloth UD-IQ4_XS (NVFP4 fork)",
+          "capabilities": {
+            "tools": true,
+            "input": ["text", "image"],
+            "output": ["text"]
+          },
+          "limit": {
+            "context": 262144,
+            "output": 32000
+          },
+          "variants": [
+            { "id": "low", "body": { "reasoning_effort": "low" } },
+            { "id": "medium", "body": { "reasoning_effort": "medium" } },
+            { "id": "high", "body": { "reasoning_effort": "high" } },
+            { "id": "xhigh", "body": { "reasoning_effort": "xhigh" } }
+          ]
+        }
+      }
+    }
+  }
+}

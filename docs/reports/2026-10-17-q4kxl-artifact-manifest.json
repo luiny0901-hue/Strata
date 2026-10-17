@@ -1,0 +1,146 @@
+{
+  "schema_version": 1,
+  "model": {
+    "repository": "unsloth/Qwen3.8-Flash-Next-GGUF",
+    "revision": "766911a6b7369840a91dbcd95f9f997acaab6cd6",
+    "variant": "UD-Q4_K_XL"
+  },
+  "nvfp4_fork": {
+    "repository": "sergqwer/strata-nvfp4",
+    "version": "0.1.44.1-nvfp4.2"
+  },
+  "files": [
+    {
+      "root": "model",
+      "path": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
+      "size": 10946624,
+      "sha256": "4448186216b3af4cc558bbce2c3213f01608f8f8b2e5267a9767971dd3ec8082"
+    },
+    {
+      "root": "model",
+      "path": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00002-of-00004.gguf",
+      "size": 49859583136,
+      "sha256": "3f342f1c1580473f1ee94ddd5b28206e8c07a70fa1a366f59d1d6c922919a6c9"
+    },
+    {
+      "root": "model",
+      "path": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "size": 49376141504,
+      "sha256": "56758f40269cad5cd9b0d3d6fbae0f40f6d5be6de49e4ab392dbe83157d9cbd3"
+    },
+    {
+      "root": "model",
+      "path": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00004-of-00004.gguf",
+      "size": 12087983520,
+      "sha256": "753bda48b98ba4f1636134a90a967de1b2d3908a236c026e464777342e53510a"
+    },
+    {
+      "root": "pack",
+      "path": "compat-bf16.json",
+      "size": 22097,
+      "sha256": "136205980a6197d1da76ff08fcc2a8aa358e066028f82c4afbd09adfa12d0b86"
+    },
+    {
+      "root": "pack",
+      "path": "conversions.json",
+      "size": 172496,
+      "sha256": "09f5568fe921c6c6dcb0af632452a5eea654dac369036d27d3813aaef45e00d1"
+    },
+    {
+      "root": "pack",
+      "path": "dense.bin",
+      "size": 1485688320,
+      "sha256": "f53174059b262ed342b82e143af62056081948ef5e5f1903a1a70eeb73fa4a23"
+    },
+    {
+      "root": "pack",
+      "path": "index.txt",
+      "size": 93560,
+      "sha256": "cfc07e91c4d9b8e8c999fd1f70fa364e584748e70fa377b30e0fc85426f52711"
+    },
+    {
+      "root": "pack",
+      "path": "native_experts.txt",
+      "size": 5795,
+      "sha256": "5ed2c4a55910616db1efe16f0c989e9bec80cc8b9e95bf1c42f886aadfffd2d6"
+    },
+    {
+      "root": "pack",
+      "path": "tokenizer/chat_template.jinja",
+      "size": 9993,
+      "sha256": "12827f24b742ea4e80cdc12dbcf9622227056b9f797252a3149263d4f9aaadce"
+    },
+    {
+      "root": "pack",
+      "path": "tokenizer/merges.txt",
+      "size": 3600844,
+      "sha256": "080cf95432173729d160346b7882bd2a644b07f7a3813a3eb73f4e66787bfde9"
+    },
+    {
+      "root": "pack",
+      "path": "tokenizer/token_type.json",
+      "size": 744960,
+      "sha256": "5088c8c298fc06af8382ddb3b76c888703ac2634e82263b97eedcc2ad202738b"
+    },
+    {
+      "root": "pack",
+      "path": "tokenizer/tokenizer.json",
+      "size": 554,
+      "sha256": "87be2ac47d8bc7393b7435df6ccd276740019a393941a2585d5edce59f450c54"
+    },
+    {
+      "root": "pack",
+      "path": "tokenizer/vocab.json",
+      "size": 5737005,
+      "sha256": "4ba64f0332abcfb0b600b7df1537d1e836e68009d5fb7cdb77339738dc6365c4"
+    },
+    {
+      "root": "fork",
+      "path": "engine/strata.exe",
+      "size": 211568128,
+      "sha256": "3dc869fb8bd9ef8456622cc14be0b0f02c353960707ecdf09d9e972e234265e5"
+    },
+    {
+      "root": "fork",
+      "path": "data/uncensor/qwen-nvfp4-gptq-uncensored.gguf",
+      "size": 267552,
+      "sha256": "a2ec3e999724022a55d48d30822bd10b1b25916ccc221013a119a674d06a46b5"
+    },
+    {
+      "root": "fork",
+      "path": "engine/strata-vision.exe",
+      "size": 4933632,
+      "sha256": "518561759983c99e73e5993c100b2bbffc30f99eae2126090768dd3374d35980"
+    },
+    {
+      "root": "data",
+      "path": "models/mmproj-Qwen3.8-Flash-Next-BF16.gguf",
+      "size": 907543008,
+      "sha256": "b1a82259702816a5330d7bd7607cd9676b11780e79ff7348c21103ff3ce49bd0"
+    },
+    {
+      "root": "data",
+      "path": "mtp/rt/dense.bin",
+      "size": 116099072,
+      "sha256": "c724dc0b0822ada5d2977bf5bde821605feabaa64ea2e0045b67ca656329070a"
+    },
+    {
+      "root": "data",
+      "path": "mtp/rt/dense.txt",
+      "size": 1880,
+      "sha256": "8773c81ebb0986e37fe94a8a9933e87be48b1fabc6889a0106bcdab179d1c2ac"
+    },
+    {
+      "root": "data",
+      "path": "mtp/rt/draft_vocab.bin",
+      "size": 425196,
+      "sha256": "b1e1d3a7a9e4bf862dcd5923ce661fb59bbd07907e594df5cf86a62ac235cb91"
+    },
+    {
+      "root": "data",
+      "path": "mtp/rt/experts.bin",
+      "size": 707788800,
+      "sha256": "09398406be61f1f54c93861f449e48b8df0bfccbc9ec9b2b7636775a6ea9244f"
+    }
+  ]
+}

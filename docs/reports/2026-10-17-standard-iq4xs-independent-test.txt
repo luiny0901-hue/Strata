@@ -1,0 +1,29 @@
+※ DOM 스텁 기반 CPU 로직 시뮬레이션입니다 (실제 브라우저·시각 검증 아님).
+
+OK   T1) "처음부터" 버튼은 startGame()에 연결 유지
+OK   T2) "이어하기" 버튼은 startGame()을 호출하지 않음
+OK   T3) "이어하기" 버튼은 continueGame()에 연결
+OK   T4) "이어보기" 버튼은 안내(toast)만 표시
+OK   R1) 이어하기 클릭 시 startGame() 미호출
+OK   R2) 이어하기 클릭 시 게임 상태 불변
+OK   R3) 이어하기가 한국어 저장 데이터 없음 안내 표시
+OK   1) 오프닝 시작: 대사 타이핑 동작
+OK   2) 오프닝 종료 후 상태 idle
+OK   3) 시우 호감도 21 → 31 이벤트 큐 등록
+OK   4) 이벤트 모드 scene
+OK   5) 이벤트 대사 큐 3줄
+OK   6) 이벤트 재생 후 idle (대사 전부 재생)
+OK   7) 다음날/휴식 흐름 실행
+OK   8) 전화 답장 호감도 +2
+OK   S1) 다음날 진행 시 버전·진행 필드로 저장 (day/energy/rested/dayUsed/fav)
+OK   S2) 저장은 진행 데이터만 포함 (오프닝 대사·개인 텍스트 미포함)
+OK   S3) 휴식·호감도 변화도 저장에 반영
+OK   S4) continueGame(): 저장을 복원하고 idle 지점으로 진입 (오프닝·이벤트 재생 없음, 체력 UI 갱신)
+OK   S5) 손상된 JSON: 안내 표시·게임 상태·저장본 그대로
+OK   S6) 미지원 버전(v+999): 거부·상태 불변
+OK   S7) 값이 잘못된 저장(fav 999·day 0): 미지원으로 거부
+OK   S8) 저장소 사용 불가(getItem throw): continueGame 안내·crash 없음·게임 진행 유지
+OK   S9) localStorage 미존재: continueGame·saveGame crash 없음
+OK   S10) 저장 데이터 없음: 「저장 데이터」 안내·상태 불변·startGame 미호출
+
+모든 검증 통과 (저장/이어하기 포함, 로직 시뮬레이션 한정 — 브라우저 렌더링·시각 미검증)
