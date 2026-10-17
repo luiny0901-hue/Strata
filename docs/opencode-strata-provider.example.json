@@ -1,5 +1,20 @@
 {
   "model": "strata/qwen3.8-flash-next-unsloth-ud-iq4_xs",
+  "agents": {
+    "build": {
+      "steps": 100
+    }
+  },
+  "compaction": {
+    "auto": true,
+    "keep": {
+      "tokens": 20000
+    },
+    "buffer": 32768
+  },
+  "instructions": [
+    "~/.config/opencode/KOREAN_INSTRUCTIONS.md"
+  ],
   "providers": {
     "strata": {
       "name": "Strata local",
@@ -29,5 +44,13 @@
         }
       }
     }
+  },
+  "watcher": {
+    "ignore": [
+      "**/Binaries/**",
+      "**/Intermediate/**",
+      "**/DerivedDataCache/**",
+      "**/Library/**"
+    ]
   }
 }

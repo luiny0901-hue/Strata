@@ -29,6 +29,22 @@ include model weights or fork binaries, or store an OpenCode API key.
    vision engine, control vector, and release manifest against the recorded
    hashes.
 
+   Apply the repository's SHA-guarded vision-pipe shutdown fix to this exact
+   release before starting it:
+
+    ```powershell
+    & .\tools\apply_nvfp4_vision_pipe_fix.ps1
+    ```
+
+   The script verifies both source hashes, is safe to rerun after the fix is
+   already applied, and refuses an unreviewed fork version. It changes only
+   `Vision.close()` to close the encoder's stdin/stdout wrappers after
+   child shutdown. It was derived from the inspected release's `server.py`
+   SHA-256 `A9D6BD95557EAE37F36D7F452463CE08451561887A5F85802A8E58DB90029D58`;
+   the locally patched file hashed to
+   `647F3AFF8DE6197523395AC8177DD2AEFB4105EBFA5BC457C0F6053446019543`.
+   See the [shutdown and OpenCode receipt](reports/2026-10-17-opencode-shutdown-followup.md).
+
 3. Install the Hugging Face download command inside Strata's virtual
    environment, sign in if repository access requires it, and download the
    three IQ4_XS shards at the pinned official revision:
@@ -94,6 +110,20 @@ include model weights or fork binaries, or store an OpenCode API key.
    preserves the existing key and other settings, changing only `model` and
    the UD-IQ4_XS model entry. It refuses a missing Strata provider or a
    different base URL.
+
+   The example also carries the verified long-project defaults: a 100-step
+   build-agent ceiling, automatic compaction retaining 20,000 recent tokens
+   with a 32,768-token buffer, and watcher ignores for common Unreal/Unity
+   generated directories. The ignore list affects file-watcher events; it is
+   not an access-control rule. Merge these keys into the global config while
+   preserving existing permissions and credentials. Compaction is lossy and
+   the step ceiling is finite; keep durable project state in `AGENTS.md` or a
+   task handoff. Copy or merge
+   [opencode-korean-long-project-instructions.example.md](opencode-korean-long-project-instructions.example.md)
+   to `~/.config/opencode/KOREAN_INSTRUCTIONS.md`; do not overwrite personal
+   instructions without saving them first. Restart Rider/OpenCode after
+   changing the global config. These settings are not applied by
+   `apply-opencode`, which changes only the selected model entry and default.
 
 7. Start one mode by double-clicking its batch file. Each batch file renders
    its portable profile, checks required files, and refuses an occupied port
