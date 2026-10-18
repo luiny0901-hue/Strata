@@ -30,6 +30,12 @@ UAC_DENY_POLICIES = (
     {"action": "tool.use", "resource": "shell:gsudo *", "effect": "deny"},
 )
 
+# OpenCode applies the final matching permission rule. Keep this terminal
+# wildcard separate from the OS-level UAC deny policies: it removes client
+# approval prompts for the user's normal account but cannot approve Windows'
+# secure desktop.
+FULL_ACCESS_PERMISSION = {"action": "*", "resource": "*", "effect": "allow"}
+
 
 def _mapping(parent: dict[str, Any], key: str, label: str) -> dict[str, Any]:
     value = parent.get(key)
@@ -129,6 +135,10 @@ def configure_policy(updated: dict[str, Any], context: int = DEFAULT_CONTEXT) ->
     for policy in UAC_DENY_POLICIES:
         if policy not in policies:
             policies.append(copy.deepcopy(policy))
+    permissions = _rules(updated, "permissions", "permissions")
+    if FULL_ACCESS_PERMISSION in permissions:
+        permissions.remove(FULL_ACCESS_PERMISSION)
+    permissions.append(copy.deepcopy(FULL_ACCESS_PERMISSION))
 
 
 def apply_config(

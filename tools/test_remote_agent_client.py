@@ -36,6 +36,7 @@ class RemoteClientTests(unittest.TestCase):
         config = json.loads(client.overlay_path(self.home).read_text(encoding="utf-8"))
         self.assertEqual(config["agents"]["build"]["steps"], 60)
         self.assertEqual(config["compaction"]["buffer"], 65536)
+        self.assertEqual(config["permissions"][-1], {"action": "*", "resource": "*", "effect": "allow"})
         self.assertEqual(config["providers"]["strata"]["models"]["server"]["modelID"], "actual-server-id")
         self.assertEqual(config["providers"]["strata"]["models"]["server"]["limit"]["output"], 32000)
         server = config["mcp"]["servers"]["cua-driver"]

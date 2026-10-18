@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT))
 
 from tools.configure_opencode_session_recovery import (  # noqa: E402
     DEFAULT_SOURCE,
+    FULL_ACCESS_PERMISSION,
     UAC_DENY_POLICIES,
     apply_config,
     compaction_policy,
@@ -58,6 +59,7 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(config["compaction"]["buffer"], 65536)
             self.assertEqual(config["agents"]["build"]["steps"], 60)
             self.assertEqual(config["policies"], list(UAC_DENY_POLICIES))
+            self.assertEqual(config["permissions"], [FULL_ACCESS_PERMISSION])
             self.assertEqual(config["model"], "strata/qwen3.8-flash-next-unsloth-ud-iq4_xs")
             self.assertEqual(config["providers"]["strata"]["apiKey"], "test-secret-preserved")
             self.assertEqual(
@@ -88,6 +90,7 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(len(config["instructions"]), 1)
             self.assertTrue(config["instructions"][0].endswith("/STRATA_SESSION_RECOVERY_KO.md"))
             self.assertEqual(config["policies"], list(UAC_DENY_POLICIES))
+            self.assertEqual(config["permissions"], [FULL_ACCESS_PERMISSION])
 
     def test_selected_small_model_scales_compaction_without_changing_its_provider(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -122,6 +125,17 @@ class InstallerTests(unittest.TestCase):
 
             config = json.loads(config_path.read_text(encoding="utf-8"))
             self.assertEqual(config["policies"], [custom, *UAC_DENY_POLICIES])
+
+    def test_full_access_rule_is_last_so_it_overrides_existing_ask_rules(self):
+        with tempfile.TemporaryDirectory() as temp:
+            config_path = Path(temp) / "opencode.json"
+            ask = {"action": "shell", "resource": "git push *", "effect": "ask"}
+            config_path.write_text(json.dumps({"permissions": [ask]}), encoding="utf-8")
+
+            apply_config(config_path, SOURCE)
+
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            self.assertEqual(config["permissions"], [ask, FULL_ACCESS_PERMISSION])
 
     def test_malformed_policies_are_preserved_and_refused(self):
         with tempfile.TemporaryDirectory() as temp:

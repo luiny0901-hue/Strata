@@ -13,6 +13,11 @@ additional calls after it had already reported the requested work complete.
   `Start-Process ... -Verb RunAs`, `runas`, `sudo`, and `gsudo` shell forms.
   The deny rules are appended after existing policies, and an invalid existing
   policy array aborts without changing the configuration.
+- The installer appends the terminal OpenCode permission rule
+  `action="*", resource="*", effect="allow"`. This lets the agent use normal
+  user-account filesystem, shell, Git, external-directory, and MCP actions
+  without an OpenCode approval dialog; the hard UAC policies still take
+  precedence for elevation commands.
 - The installed recovery instruction requires `BLOCKED_UAC` reporting instead
   of waiting, polling, retrying, or bypassing an elevation prompt. It tells the
   user the one required manual administrator action and resumes only after a
@@ -30,7 +35,7 @@ additional calls after it had already reported the requested work complete.
 | IQ4_XS profile and local OpenCode helper tests | PASS — 13 tests |
 | Node CUA policy and catalogue tests | PASS — 11 tests |
 | Profile JSON parsing | PASS |
-| Current user OpenCode configuration | PASS — one recovery instruction, one CUA instruction, five UAC deny policies, CUA direct-tool mode enabled |
+| Current user OpenCode configuration | PASS — terminal wildcard allow rule, five UAC deny policies, and CUA direct-tool mode enabled |
 
 No UAC prompt, Rider or Hermes session, real CUA input, Strata request, model,
 or GPU process was started for this change. The policy prevents the known shell
