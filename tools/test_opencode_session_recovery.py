@@ -108,6 +108,8 @@ class InstallerTests(unittest.TestCase):
     def test_installed_recovery_instructions_define_uac_and_completion_boundaries(self):
         source = SOURCE.read_text(encoding="utf-8")
         self.assertIn("BLOCKED_UAC", source)
+        self.assertIn("WAITING_FOR_USER_CONFIRMATION", source)
+        self.assertIn("승인 완료, 계속", source)
         self.assertIn("완료는 종료 상태", source)
         self.assertIn("첫 도구 호출 전에 사용자의 의도를 분류", source)
         self.assertIn("설명만 원하나요, 실제 확인·수정까지 진행할까요?", source)

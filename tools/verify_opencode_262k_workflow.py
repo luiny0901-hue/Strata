@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -37,6 +38,8 @@ class FakeOpenAiServer(ThreadingHTTPServer):
         self.requests: list[dict[str, Any]] = []
         self.paths: list[str] = []
         self.report_large_initial_turn = True
+        self.confirmation_command: str | None = None
+        self.confirmation_phase = "idle"
         self.lock = threading.Lock()
 
 
@@ -165,6 +168,53 @@ class FakeOpenAiHandler(BaseHTTPRequestHandler):
                 ),
             )
             return
+        confirmation_workflow = "WAIT_FOR_CONFIRMATION" in json.dumps(messages)
+        if confirmation_workflow and tools:
+            if messages and messages[-1].get("role") == "user" and self.server.confirmation_phase == "idle":
+                if not self.server.confirmation_command:
+                    self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR)
+                    return
+                self.server.confirmation_phase = "waiting"
+                self._completion(
+                    number,
+                    request,
+                    {
+                        "id": f"call-confirm-{number}",
+                        "type": "function",
+                        "function": {
+                            "name": "shell",
+                            "arguments": json.dumps(
+                                {
+                                    "command": self.server.confirmation_command,
+                                    "description": "Wait for the isolated confirmation fixture",
+                                    "timeout": 10_000,
+                                }
+                            ),
+                        },
+                    },
+                )
+                return
+            if messages and messages[-1].get("role") == "tool" and self.server.confirmation_phase == "waiting":
+                self.server.confirmation_phase = "continued"
+                self._completion(
+                    number,
+                    request,
+                    {
+                        "id": f"call-continue-{number}",
+                        "type": "function",
+                        "function": {
+                            "name": "write",
+                            "arguments": json.dumps(
+                                {"path": "confirmation-follow-up.txt", "content": "continued after confirmation\n"}
+                            ),
+                        },
+                    },
+                )
+                return
+            if messages and messages[-1].get("role") == "tool" and self.server.confirmation_phase == "continued":
+                self.server.confirmation_phase = "completed"
+                self._completion(number, request)
+                return
         if tools and messages and messages[-1].get("role") == "user":
             revised = "REVISE_WORKFLOW" in str(latest_user)
             content = "revised by follow-up\n" if revised else "created by initial task\n"
@@ -297,6 +347,38 @@ def checkpoint_request_count(requests: list[dict[str, Any]]) -> int:
     return sum("<conversation-checkpoint>" in messages for messages in serialized)
 
 
+def write_confirmation_gate(workdir: Path) -> tuple[Path, Path, Path, Path]:
+    """Create a non-elevated program that blocks until the test releases it."""
+    gate = workdir / "confirmation_gate.py"
+    waiting = workdir / "confirmation-waiting.marker"
+    approval = workdir / "confirmation-approved.marker"
+    result = workdir / "confirmation-result.txt"
+    gate.write_text(
+        """from pathlib import Path
+import sys
+import time
+
+waiting, approval, result = (Path(value) for value in sys.argv[1:4])
+waiting.write_text("waiting\\n", encoding="utf-8")
+deadline = time.monotonic() + 10
+while not approval.exists() and time.monotonic() < deadline:
+    time.sleep(0.05)
+if not approval.exists():
+    raise SystemExit("confirmation timed out")
+result.write_text("approved\\n", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
+    return gate, waiting, approval, result
+
+
+def powershell_call(*paths: Path) -> str:
+    def quote(value: str) -> str:
+        return "'" + value.replace("'", "''") + "'"
+
+    return "& " + " ".join(quote(str(path)) for path in paths)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--keep-artifacts", action="store_true", help="print and retain the temporary fixture directory")
@@ -374,6 +456,58 @@ def main() -> int:
                 f"Follow-up exited with {follow_up.returncode}; request shapes={shapes!r}; "
                 f"stderr tail={follow_up.stderr[-1000:]!r}."
             )
+        gate, waiting, approval, confirmation_result = write_confirmation_gate(workdir)
+        server.confirmation_command = powershell_call(Path(sys.executable), gate, waiting, approval, confirmation_result)
+        release_observed = threading.Event()
+
+        def release_confirmation() -> None:
+            deadline = time.monotonic() + 10
+            while not waiting.exists() and time.monotonic() < deadline:
+                time.sleep(0.05)
+            if waiting.exists():
+                time.sleep(2)
+                approval.write_text("approved by fixture\n", encoding="utf-8")
+                release_observed.set()
+
+        release_thread = threading.Thread(target=release_confirmation, daemon=True)
+        release_thread.start()
+        started = time.monotonic()
+        confirmation = run_opencode(
+            [
+                executable,
+                "--print-logs",
+                "run",
+                "--standalone",
+                "--auto",
+                "--format",
+                "json",
+                "--model",
+                f"fixture/{MODEL_ID}",
+                "--agent",
+                "build",
+                "--session",
+                "ses_opencode_confirmation_resume",
+                "WAIT_FOR_CONFIRMATION: run the isolated confirmation program, then create the follow-up file.",
+            ],
+            workdir,
+            root,
+        )
+        elapsed = time.monotonic() - started
+        release_thread.join(timeout=2)
+        if confirmation.returncode != 0:
+            with server.lock:
+                shapes = request_shapes(server.requests)
+            raise RuntimeError(
+                f"Confirmation flow exited with {confirmation.returncode}; request shapes={shapes!r}; "
+                f"stderr tail={confirmation.stderr[-1000:]!r}."
+            )
+        continued = workdir / "confirmation-follow-up.txt"
+        if not release_observed.is_set() or confirmation_result.read_text(encoding="utf-8") != "approved\n":
+            raise RuntimeError("The isolated confirmation program was not released by the delayed approval fixture.")
+        if continued.read_text(encoding="utf-8") != "continued after confirmation\n":
+            raise RuntimeError("OpenCode did not execute the action following delayed confirmation.")
+        if elapsed < 1.5:
+            raise RuntimeError(f"Confirmation flow finished too early to observe the delayed approval: {elapsed:.3f}s.")
         with server.lock:
             request_count = len(server.requests)
             paths = list(server.paths)
@@ -406,8 +540,11 @@ def main() -> int:
                     "compacted_checkpoint_requests": checkpoints,
                     "endpoint_paths": paths,
                     "workflow_file": actual,
+                    "confirmation_delay_seconds": round(elapsed, 3),
+                    "confirmation_file": continued.read_text(encoding="utf-8"),
                     "initial_event_types": event_types(initial.stdout),
                     "follow_up_event_types": follow_up_events,
+                    "confirmation_event_types": event_types(confirmation.stdout),
                 },
                 ensure_ascii=False,
             )

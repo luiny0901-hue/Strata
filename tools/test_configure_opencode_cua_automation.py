@@ -226,6 +226,12 @@ class CuaInstallerTests(unittest.TestCase):
         driver.write_bytes(b"fixture")
         self.assertEqual(locate_cua_driver(self.root), driver.resolve())
 
+    def test_source_instructions_keep_uac_blocked_and_standard_confirmation_bounded(self):
+        source = (ROOT / "examples" / "opencode" / "OPENCODE_CUA_AUTOMATION_KO.md").read_text(encoding="utf-8")
+        self.assertIn("BLOCKED_UAC", source)
+        self.assertIn("WAITING_FOR_USER_CONFIRMATION", source)
+        self.assertIn("승인 완료, 계속", source)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
