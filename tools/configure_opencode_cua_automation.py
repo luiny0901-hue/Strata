@@ -21,6 +21,13 @@ INSTRUCTIONS_NAME = "OPENCODE_CUA_AUTOMATION_KO.md"
 
 OLD_DELIVERY_PREFIX = "- \uC785\uB825\uC740 \uC815\uD655\uD55C \uCC3D \uB300\uC0C1\uC73C\uB85C `delivery_mode: "
 OLD_STOP_PREFIX = "- `background_unavailable`, 권한 거부, 창 식별 실패가 발생하면"
+OLD_DISCOVERY_PREFIX = "- \uBA3C\uC800 `list_windows`\uB85C \uB300\uC0C1 \uC571\uC744 \uCC3E\uACE0"
+OLD_IDENTITY_PREFIX = "- GUI \uC870\uC791 \uC804\uD6C4\uC5D0 \uC571\uACFC \uCC3D\uC758 \uC815\uCCB4\uC131\uC744 \uD655\uC778\uD558\uACE0"
+OLD_STABILITY_PREFIX = "- \uAC01 \uD074\uB9AD\u00B7\uD1A0\uAE00\u00B7\uC120\uD0DD \uC785\uB825\uC740 \uAC00\uC7A5 \uCD5C\uADFC"
+NEW_DISCOVERY_LINE = (
+    "- 작업 시작 때 `list_windows`로 앱과 PID/HWND를 한 번 식별하고 같은 창을 다루는 동안 재사용한다. "
+    "앱 재시작, 새 창 생성, ID 오류·불일치가 생긴 경우에만 목록을 다시 읽는다. 첫 입력 전에는 해당 창의 `get_window_state`를 읽는다."
+)
 NEW_DELIVERY_LINE = (
     '- 입력은 정확한 창 PID/HWND 대상으로 `background`부터 시도한다. '
     '드라이버의 `background_unavailable` 응답 또는 새 화면 상태에서 확인된 명백한 무동작 후에만 '
@@ -30,6 +37,16 @@ NEW_STOP_LINE = (
     "- `foreground`는 대상 창을 잠시 활성화해 실제 입력을 전달한다. 사용자의 입력을 방해할 수 있거나 "
     "창 정체·결과가 불명확하면 사용하지 않는다. 데스크톱 전체 대상, 전역 입력, 셸/네이티브 입력 우회는 계속 금지하며, "
     "권한 거부나 확인되지 않은 결과에서는 멈춘다."
+)
+NEW_IDENTITY_LINE = (
+    "- 앱/창 정체성은 작업 시작과 결과 검증 때 확인한다. 동일 창에서 연속 작업 중에는 `list_windows`를 매번 반복하지 않는다. "
+    "새 창 출현, 창 닫힘, PID/HWND 오류·불일치가 나타날 때만 목록을 다시 조회한다."
+)
+NEW_STABILITY_LINE = (
+    "- 클릭·토글·선택은 가장 최근 `get_window_state`의 `element_token`을 사용한다. 각 동작 뒤 상태를 확인할 때 직전 `snapshot_id`를 "
+    "`since`에 전달하고 `include_screenshot:false`로 변경된 트리만 읽어 새 토큰을 얻는다. 화면 픽셀 확인, 캔버스 조작, 불확실한 결과에서만 "
+    "스크린샷을 요청한다. 큰 트리는 `query`·`max_depth`·`max_elements`로 제한하고 `both`·`full_output`은 필요한 경우에만 쓴다. "
+    "`element_token is stale` 오류는 상태를 한 번 새로 읽어 최대 한 번만 재표적화한다."
 )
 
 
@@ -104,20 +121,32 @@ def _patch_gui_instructions(path: Path) -> bytes | None:
         return None
     text, has_bom = _read_text_preserving_newlines(path)
     lines = text.splitlines(keepends=True)
-    old_delivery = [i for i, line in enumerate(lines) if line.rstrip("\r\n").startswith(OLD_DELIVERY_PREFIX)]
-    old_stop = [i for i, line in enumerate(lines) if line.rstrip("\r\n").startswith(OLD_STOP_PREFIX)]
-    new_delivery = [i for i, line in enumerate(lines) if line.rstrip("\r\n") == NEW_DELIVERY_LINE]
-    new_stop = [i for i, line in enumerate(lines) if line.rstrip("\r\n") == NEW_STOP_LINE]
+    old_prefixes = (OLD_DISCOVERY_PREFIX, OLD_DELIVERY_PREFIX, OLD_STOP_PREFIX, OLD_IDENTITY_PREFIX, OLD_STABILITY_PREFIX)
+    new_lines = (NEW_DISCOVERY_LINE, NEW_DELIVERY_LINE, NEW_STOP_LINE, NEW_IDENTITY_LINE, NEW_STABILITY_LINE)
+    old_matches = [
+        [i for i, line in enumerate(lines) if line.rstrip("\r\n").startswith(prefix)]
+        for prefix in old_prefixes
+    ]
+    new_matches = [
+        [i for i, line in enumerate(lines) if line.rstrip("\r\n") == replacement]
+        for replacement in new_lines
+    ]
 
-    if len(new_delivery) == 1 and len(new_stop) == 1 and not old_delivery and not old_stop:
+    updates: list[tuple[int, str]] = []
+    for old, new, replacement in zip(old_matches, new_matches, new_lines):
+        if len(old) == 1 and not new:
+            updates.append((old[0], replacement))
+        elif not old and len(new) == 1:
+            continue
+        else:
+            raise ValueError(
+                f"Could not safely identify the old CUA policy in {path}; no files were changed. "
+                "Review that instruction file manually before installation."
+            )
+    if not updates:
         return None
-    if len(old_delivery) != 1 or len(old_stop) != 1 or new_delivery or new_stop:
-        raise ValueError(
-            f"Could not safely identify the old CUA policy in {path}; no files were changed. "
-            "Review that instruction file manually before installation."
-        )
 
-    for index, replacement in ((old_delivery[0], NEW_DELIVERY_LINE), (old_stop[0], NEW_STOP_LINE)):
+    for index, replacement in updates:
         ending = "\r\n" if lines[index].endswith("\r\n") else "\n" if lines[index].endswith("\n") else ""
         lines[index] = replacement + ending
     body = "".join(lines).encode("utf-8")
