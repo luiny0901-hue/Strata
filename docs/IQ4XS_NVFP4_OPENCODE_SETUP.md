@@ -1,5 +1,7 @@
 # NVFP4 fork + Unsloth UD-IQ4_XS for OpenCode
 
+> 현재 통합 설치/복원 진입점은 [OPENCODE_QUICKSTART_KO.md](OPENCODE_QUICKSTART_KO.md)입니다. 아래의 이전 수동 설정 예시보다 통합 설치기를 우선 사용하세요.
+
 This opt-in Windows setup uses the user's NVFP4 fork build with Unsloth
 UD-IQ4_XS as the OpenCode default. It does not change Strata's installer,
 include model weights or fork binaries, or store an OpenCode API key.
@@ -16,8 +18,8 @@ subnet, and installs CUA Driver locally on each OpenCode client.
     ```powershell
     git clone https://github.com/luiny0901-hue/Strata.git
     Set-Location Strata
-    git fetch origin feature/iq4xs-opencode-setup
-    git switch --track origin/feature/iq4xs-opencode-setup
+    git fetch origin feature/opencode-session-recovery
+    git switch --track origin/feature/opencode-session-recovery
     ```
 
 2. Install Strata and its Python environment using
@@ -118,9 +120,9 @@ subnet, and installs CUA Driver locally on each OpenCode client.
    URL. The command also installs the bounded Windows and Linux command runners
    under `~/.config/opencode/scripts/` without changing neighboring scripts.
 
-   The example also carries the verified long-project defaults: a 100-step
-   build-agent ceiling, automatic compaction retaining 20,000 recent tokens
-   with a 32,768-token buffer, and watcher ignores for common Unreal/Unity
+   The example also carries the verified long-project defaults: a 60-step
+   build-agent ceiling, automatic compaction retaining 12,000 recent tokens
+   with a 65,536-token buffer, and watcher ignores for common Unreal/Unity
    generated directories. The ignore list affects file-watcher events; it is
    not an access-control rule. Merge these keys into the global config while
    preserving existing permissions and credentials. Compaction is lossy and

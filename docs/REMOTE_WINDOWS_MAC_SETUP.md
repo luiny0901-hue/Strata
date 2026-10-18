@@ -1,5 +1,7 @@
 # OpenCode on another Windows PC or Apple Silicon Mac
 
+> 현재 통합 설치/복원 진입점은 [OPENCODE_QUICKSTART_KO.md](OPENCODE_QUICKSTART_KO.md)입니다. 아래의 이전 수동 설정 예시보다 통합 설치기를 우선 사용하세요.
+
 This setup keeps the Strata model on the RTX 3090 Ti Windows host. A client
 Windows PC or Apple Silicon Mac runs its own OpenCode and its own CUA Driver.
 OpenCode sends model requests over the private LAN to Strata; CUA Driver acts

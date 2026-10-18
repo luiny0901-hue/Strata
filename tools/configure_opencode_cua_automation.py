@@ -120,6 +120,9 @@ def _patch_gui_instructions(path: Path) -> bytes | None:
     if not path.exists():
         return None
     text, has_bom = _read_text_preserving_newlines(path)
+    if "## OpenCode GUI 자동 사용" not in text and "CUA Driver 입력 안정화" not in text:
+        # Unrelated personal instructions are not a legacy GUI policy.
+        return None
     lines = text.splitlines(keepends=True)
     old_prefixes = (OLD_DISCOVERY_PREFIX, OLD_DELIVERY_PREFIX, OLD_STOP_PREFIX, OLD_IDENTITY_PREFIX, OLD_STABILITY_PREFIX)
     new_lines = (NEW_DISCOVERY_LINE, NEW_DELIVERY_LINE, NEW_STOP_LINE, NEW_IDENTITY_LINE, NEW_STABILITY_LINE)
@@ -163,14 +166,18 @@ def _find_runtime_path(
 ) -> Path:
     candidates: list[Path] = []
     if explicit is not None:
-        candidates.append(explicit.expanduser())
+        explicit = explicit.expanduser()
+        if not explicit.is_file():
+            raise ValueError(f"Explicit runtime does not exist: {explicit}; no files were changed.")
+        return explicit.resolve()
     configured = os.environ.get(env_name)
     if configured:
         candidates.append(Path(configured).expanduser())
     if node:
         server = _configured_cua_server(config)
         command = server.get("command") if isinstance(server, dict) else None
-        if isinstance(command, list) and command and isinstance(command[0], str):
+        if (isinstance(command, list) and command and isinstance(command[0], str)
+                and Path(command[0]).stem.lower() == "node"):
             candidates.append(Path(command[0]).expanduser())
     else:
         server = _configured_cua_server(config)
@@ -178,6 +185,9 @@ def _find_runtime_path(
         configured_driver = environment.get("CUA_DRIVER_EXE") if isinstance(environment, dict) else None
         if isinstance(configured_driver, str) and configured_driver:
             candidates.append(Path(configured_driver).expanduser())
+        installed = locate_cua_driver(Path.home())
+        if installed:
+            candidates.append(installed)
         if os.name == "nt" and os.environ.get("LOCALAPPDATA"):
             candidates.append(Path(os.environ["LOCALAPPDATA"]) / "Programs" / "Cua" / "cua-driver" / "bin" / "cua-driver.exe")
 
@@ -193,20 +203,43 @@ def _find_runtime_path(
     )
 
 
-def apply_configuration(
+def locate_cua_driver(home: Path) -> Path | None:
+    """Resolve the installer's current pointer, never guess a release version."""
+    name = "cua-driver.exe" if os.name == "nt" else "cua-driver"
+    candidates = [home / ".cua-driver" / "packages" / "current" / name]
+    for name in ("cua-driver", "cua-driver.exe"):
+        found = shutil.which(name)
+        if found:
+            candidates.append(Path(found))
+    candidates.extend([
+        home / ".local" / "bin" / "cua-driver",
+        Path("/Applications/CuaDriver.app/Contents/MacOS/cua-driver"),
+    ])
+    if os.name == "nt":
+        local = Path(os.environ.get("LOCALAPPDATA", home / "AppData/Local"))
+        candidates.extend(local / "Programs" / vendor / "bin/cua-driver.exe"
+                          for vendor in ("Cua/cua-driver", "trycua/cua-driver-rs"))
+    return next((path.resolve() for path in candidates if path.is_file()), None)
+
+
+def prepare_configuration(
     config_path: Path = DEFAULT_CONFIG,
     cua_dir: Path = DEFAULT_CUA_DIR,
     instructions_path: Path = DEFAULT_INSTRUCTIONS,
     node_path: Path | None = None,
     driver_path: Path | None = None,
     source_root: Path = ROOT,
-) -> dict[str, Any]:
-    config_path = config_path.expanduser()
-    cua_dir = cua_dir.expanduser()
+    config_document: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], dict[Path, bytes]]:
+    """Validate and render every file without writing (also used by remote setup)."""
+    config_path = config_path.expanduser().resolve()
+    cua_dir = cua_dir.expanduser().resolve()
     instructions_path = instructions_path.expanduser()
     source_root = source_root.resolve()
 
-    if config_path.exists():
+    if config_document is not None:
+        config = config_document
+    elif config_path.exists():
         try:
             config = json.loads(config_path.read_text(encoding="utf-8-sig"))
         except (OSError, UnicodeError, json.JSONDecodeError) as error:
@@ -222,25 +255,24 @@ def apply_configuration(
     try:
         updated = json.loads(json.dumps(config))
         mcp = _object(updated, "mcp", "mcp")
-        legacy_servers = mcp.get("servers")
-        legacy_server = legacy_servers.get("cua-driver") if isinstance(legacy_servers, dict) else None
-        direct_server = mcp.get("cua-driver")
-        if legacy_server is not None and not isinstance(legacy_server, dict):
-            raise ValueError("Legacy mcp.servers.cua-driver must be an object; no files were changed.")
-        if direct_server is not None and not isinstance(direct_server, dict):
-            raise ValueError("mcp.cua-driver must be an object; no files were changed.")
-        if isinstance(legacy_server, dict):
-            if isinstance(direct_server, dict) and direct_server != legacy_server:
-                raise ValueError(
-                    "Conflicting mcp.cua-driver and legacy mcp.servers.cua-driver entries; "
-                    "review the config manually. No files were changed."
-                )
-            if direct_server is None:
-                mcp["cua-driver"] = legacy_server
-            del legacy_servers["cua-driver"]
-            if not legacy_servers:
-                del mcp["servers"]
-        server = _object(mcp, "cua-driver", "mcp.cua-driver")
+        servers = _object(mcp, "servers", "mcp.servers")
+        # OpenCode V2 accepts V1 syntax but its migration drops V2-only fields
+        # such as codemode. Normalize direct server entries before installing.
+        for name, entry in list(mcp.items()):
+            if name == "servers":
+                continue
+            if not isinstance(entry, dict) or entry.get("type") not in ("local", "remote"):
+                raise ValueError(f"Unknown legacy mcp.{name}; no files were changed.")
+            if name in servers and servers[name] != entry:
+                raise ValueError(f"Conflicting mcp.{name} and mcp.servers.{name}; no files were changed.")
+            servers[name] = entry
+            del mcp[name]
+        for entry in servers.values():
+            if isinstance(entry, dict) and "enabled" in entry:
+                if "disabled" in entry and entry["disabled"] != (not entry["enabled"]):
+                    raise ValueError("Conflicting MCP enabled/disabled flags; no files were changed.")
+                entry["disabled"] = not entry.pop("enabled")
+        server = _object(servers, "cua-driver", "mcp.servers.cua-driver")
         environment = _object(server, "environment", "mcp.cua-driver.environment")
         instructions = updated.get("instructions", [])
         if isinstance(instructions, str):
@@ -250,18 +282,19 @@ def apply_configuration(
     except ValueError:
         raise
 
-    installed_doc = cua_dir.parent / "opencode" / INSTRUCTIONS_NAME
+    installed_doc = config_path.parent / INSTRUCTIONS_NAME
     # Keep policy and wrapper beside the existing CUA driver's per-user config.
     policy_target = cua_dir / "opencode-window-scoped.rego"
     wrapper_target = cua_dir / "opencode-mcp.mjs"
     module_target = cua_dir / "opencode-policy.mjs"
 
-    doc_source = source_root / "docs" / INSTRUCTIONS_NAME
+    doc_source = source_root / "examples" / "opencode" / INSTRUCTIONS_NAME
     if not doc_source.is_file():
         raise ValueError(f"CUA instruction template missing: {doc_source}; no files were changed.")
     doc_content = doc_source.read_bytes()
     template_contents = {
         wrapper_target: (source_root / "tools" / "cua-driver" / "opencode-mcp.mjs").read_bytes(),
+        cua_dir / "opencode-catalog.mjs": (source_root / "tools/cua-driver/opencode-catalog.mjs").read_bytes(),
         module_target: (source_root / "tools" / "cua-driver" / "opencode-policy.mjs").read_bytes(),
         policy_target: (source_root / "tools" / "cua-driver" / "opencode-window-scoped.rego").read_bytes(),
         installed_doc: doc_content,
@@ -272,8 +305,9 @@ def apply_configuration(
 
     server["type"] = "local"
     server["command"] = [str(resolved_node), str(wrapper_target)]
-    server["enabled"] = True
-    server.pop("disabled", None)
+    server["disabled"] = False
+    server["codemode"] = False
+    server.pop("enabled", None)
     environment["CUA_DRIVER_EXE"] = str(resolved_driver)
     environment["CUA_DRIVER_POLICY_FILE"] = str(policy_target)
     environment["CUA_DRIVER_PERMISSION_MODE"] = "standard"
@@ -294,9 +328,27 @@ def apply_configuration(
             raise ValueError(f"Could not safely update the existing GUI policy in {instructions_path}; no files were changed.")
 
     config_changed = updated != config
-    if config_changed:
+    if config_changed or config_document is not None:
         template_contents[config_path] = (json.dumps(updated, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
+    return {
+        "config_path": str(config_path),
+        "cua_policy_path": str(policy_target),
+        "instructions_path": str(installed_doc),
+        "config_changed": config_changed,
+    }, template_contents
+
+
+def apply_configuration(
+    config_path: Path = DEFAULT_CONFIG,
+    cua_dir: Path = DEFAULT_CUA_DIR,
+    instructions_path: Path = DEFAULT_INSTRUCTIONS,
+    node_path: Path | None = None,
+    driver_path: Path | None = None,
+    source_root: Path = ROOT,
+) -> dict[str, Any]:
+    result, template_contents = prepare_configuration(
+        config_path, cua_dir, instructions_path, node_path, driver_path, source_root)
     changed_targets = [target for target, content in template_contents.items() if not target.exists() or target.read_bytes() != content]
     backups: list[str] = []
     for target in changed_targets:
@@ -305,21 +357,15 @@ def apply_configuration(
     for target in changed_targets:
         _atomic_write(target, template_contents[target])
 
-    return {
-        "config_path": str(config_path.resolve()),
-        "cua_policy_path": str(policy_target.resolve()),
-        "instructions_path": str(installed_doc.resolve()),
-        "config_changed": config_changed,
-        "changed_files": [str(path.resolve()) for path in changed_targets],
-        "backups": backups,
-    }
+    result.update(changed_files=[str(path.resolve()) for path in changed_targets], backups=backups)
+    return result
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG, help="OpenCode config path")
     parser.add_argument("--cua-config-dir", type=Path, default=DEFAULT_CUA_DIR, help="CUA Driver config directory")
-    parser.add_argument("--instructions-file", type=Path, default=DEFAULT_INSTRUCTIONS, help="existing Korean global instructions to patch safely")
+    parser.add_argument("--instructions-file", type=Path, help="existing Korean instructions (default: beside --config)")
     parser.add_argument("--node", type=Path, help="Node.js executable (defaults to existing config or PATH)")
     parser.add_argument("--driver", type=Path, help="CUA Driver executable (defaults to existing config or PATH)")
     args = parser.parse_args()
@@ -327,7 +373,7 @@ def main() -> int:
         result = apply_configuration(
             args.config,
             args.cua_config_dir,
-            args.instructions_file,
+            args.instructions_file or args.config.parent / "KOREAN_INSTRUCTIONS.md",
             args.node,
             args.driver,
         )

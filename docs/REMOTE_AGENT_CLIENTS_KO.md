@@ -1,5 +1,7 @@
 # Windows Strata를 OpenCode, Rider, Hermes에서 사용하기
 
+> 현재 통합 설치/복원 진입점은 [OPENCODE_QUICKSTART_KO.md](OPENCODE_QUICKSTART_KO.md)입니다. 아래의 이전 수동 설정 예시보다 통합 설치기를 우선 사용하세요.
+
 이 안내서는 Windows에서 실행하는 Strata API를 Windows 또는 macOS의 OpenCode, Rider, Hermes에서 사용하는 방법을 정리합니다. 모델 실행 파일과 모델 데이터는 Strata 호스트에만 둡니다. macOS 클라이언트가 이 Windows CUDA/NVFP4 실행 파일을 직접 실행하는 구성은 아닙니다.
 
 ## 새 클라이언트 PC 빠른 설정

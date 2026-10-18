@@ -58,7 +58,7 @@ echo LAN API bind is enabled; authentication is required. Use only a trusted Pri
 echo If remote clients are blocked, install the Private/LocalSubnet rule from the setup checkout's tools\windows\allow_strata_lan.ps1.
 echo Uncensored mode is ON; the compatible refusal projection is loaded.
 echo Context cap: 262144. Full 262K context stress was not verified.
-echo Vision encoder defaults to CPU. See docs/reports/2026-10-17-iq4xs-vision-cpu-gpu-comparison.md
+echo Vision encoding uses CPU. The comparison sent no image.
 "%PYTHON%" -m serve.server --engine strata --config "%PROFILE%" --host 0.0.0.0 --port 8080 --image-max-tokens 1024
 set "EXIT_CODE=%ERRORLEVEL%"
 if not "%EXIT_CODE%"=="0" (echo Strata fork server exited with code %EXIT_CODE%.& pause)

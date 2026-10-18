@@ -2,14 +2,15 @@
   "default_agent": "build",
   "agents": {
     "build": {
-      "steps": 100
+      "steps": 60
     }
   },
   "compaction": {
     "auto": true,
     "keep": {
-      "tokens": 20000
-    }
+      "tokens": 12000
+    },
+    "buffer": 65536
   },
   "instructions": [
     "~/.config/opencode/KOREAN_INSTRUCTIONS.md"

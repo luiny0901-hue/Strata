@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 import readline from "node:readline";
-import { exposedTools, isSafeCall } from "./opencode-policy.mjs";
+import { exposedTools, isSafeCall, prepareCall } from "./opencode-policy.mjs";
+
+import { readCatalog } from "./opencode-catalog.mjs";
 
 const driver = process.env.CUA_DRIVER_EXE;
 const policy = process.env.CUA_DRIVER_POLICY_FILE;
@@ -25,76 +27,33 @@ function errorResult(id, code, message) {
   });
 }
 
-async function catalogTools() {
-  const env = { ...process.env };
-  delete env.CUA_DRIVER_POLICY_FILE;
-  delete env.CUA_DRIVER_MANAGED_POLICY_FILE;
-  delete env.CUA_DRIVER_PERMISSION_MODE;
-  delete env.CUA_DRIVER_CAPABILITY_MANIFEST_FILE;
-  delete env.CUA_DRIVER_CAPABILITY_MANIFEST_APPROVED;
-
-  const child = spawn(driver, ["mcp"], { stdio: ["pipe", "pipe", "inherit"], env });
-  const lines = readline.createInterface({ input: child.stdout });
-  const pending = new Map();
-  lines.on("line", (line) => {
-    try {
-      const msg = JSON.parse(line);
-      if (msg.id !== undefined && pending.has(String(msg.id))) {
-        pending.get(String(msg.id))(msg);
-        pending.delete(String(msg.id));
-      }
-    } catch { /* ignore non-JSON diagnostics */ }
-  });
-  child.on("exit", (code) => {
-    for (const reject of pending.values()) reject(new Error(`catalog process exited (${code})`));
-    pending.clear();
-  });
-  let id = 1;
-  const request = (method, params = {}) => new Promise((resolve, reject) => {
-    const requestId = id++;
-    const timer = setTimeout(() => {
-      pending.delete(String(requestId));
-      reject(new Error(`catalog ${method} timed out`));
-    }, 20000);
-    pending.set(String(requestId), (msg) => { clearTimeout(timer); resolve(msg); });
-    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: requestId, method, params })}\n`);
-  });
-
-  try {
-    const init = await request("initialize", {
-      protocolVersion: "2024-11-05",
-      capabilities: {},
-      clientInfo: { name: "opencode-cua-window-policy", version: "1.1" },
-    });
-    if (init.error || !init.result?.serverInfo) throw new Error("Cua catalog initialize failed");
-    child.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
-    const response = await request("tools/list");
-    if (response.error || !Array.isArray(response.result?.tools)) throw new Error("Cua tool catalog unavailable");
-    return response.result.tools.filter((tool) => exposedTools.has(tool.name));
-  } finally {
-    lines.close();
-    child.stdin.end();
-    await new Promise((resolve) => {
-      if (child.exitCode !== null) resolve();
-      else child.once("exit", resolve);
-      setTimeout(() => { if (child.exitCode === null) child.kill(); resolve(); }, 3000).unref();
-    });
-  }
-}
-
-const tools = await catalogTools();
+let tools;
+try { tools = await readCatalog(driver, ["mcp"], exposedTools); }
+catch (error) { console.error(`CUA catalog unavailable: ${error.message}`); process.exit(3); }
 if (tools.length !== exposedTools.size) {
   console.error(`Expected ${exposedTools.size} safe Cua tools, found ${tools.length}.`);
   process.exit(3);
 }
 
-const action = spawn(driver, ["mcp"], { stdio: ["pipe", "pipe", "inherit"], env: process.env });
+const action = spawn(driver, ["mcp"], { stdio: ["pipe", "pipe", "inherit"], env: process.env, windowsHide: true });
 const actionLines = readline.createInterface({ input: action.stdout });
 const parentLines = readline.createInterface({ input: process.stdin });
 const initializeIds = new Set();
+const pendingIds = new Set();
+function driverFailed(message) {
+  for (const id of pendingIds) errorResult(id, "driver_unavailable", `${message}. Do not replay an input automatically; inspect the window before recovery.`);
+  pendingIds.clear();
+  parentLines.close();
+  process.stdin.destroy();
+  action.stdin.destroy();
+  process.exitCode = 1;
+}
+action.on("error", () => driverFailed("CUA Driver could not start"));
+action.stdin.on("error", () => driverFailed("CUA Driver input pipe closed"));
 actionLines.on("line", (line) => {
   try {
     const msg = JSON.parse(line);
+    if (msg.id !== undefined) pendingIds.delete(msg.id);
     if (msg.id !== undefined && initializeIds.has(String(msg.id)) && msg.result) {
       initializeIds.delete(String(msg.id));
       msg.result.instructions = [
@@ -129,6 +88,7 @@ parentLines.on("line", (line) => {
       errorResult(msg.id, "permission_denied", `Cua safety policy refused '${name}': a supported tool and exact window target are required; desktop-wide input remains disabled.`);
       return;
     }
+    msg.params.arguments = prepareCall(name, args);
   }
   if (msg.method === "initialize" && msg.id !== undefined) initializeIds.add(String(msg.id));
 
@@ -136,10 +96,13 @@ parentLines.on("line", (line) => {
     if (msg.id !== undefined) jsonLine({ jsonrpc: "2.0", id: msg.id, error: { code: -32000, message: "Cua Driver process is unavailable" } });
     return;
   }
+  if (msg.id !== undefined) pendingIds.add(msg.id);
   action.stdin.write(`${JSON.stringify(msg)}\n`);
 });
 
 parentLines.on("close", () => action.stdin.end());
 process.on("SIGINT", () => { action.kill(); process.exit(130); });
 process.on("SIGTERM", () => { action.kill(); process.exit(143); });
-action.on("exit", (code) => { if (code !== 0 && code !== null) process.exitCode = code; });
+action.on("exit", (code) => {
+  if (pendingIds.size || (code !== 0 && code !== null)) driverFailed(`CUA Driver exited (${code})`);
+});

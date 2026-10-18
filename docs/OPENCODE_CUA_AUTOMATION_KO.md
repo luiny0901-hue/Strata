@@ -40,4 +40,6 @@
 
 속도 비교 시에는 같은 앱·창·동작을 기준으로 `list_windows` 횟수, 스크린샷 포함 상태 읽기 횟수, `since` 트리 갱신 횟수와 전체 완료 시간을 기록합니다. 설정 변경만으로 성능 향상을 확정하지 않습니다.
 
-Windows에서 실행 경로와 화면 입력을 확인했습니다. macOS/Linux용 설정은 경로 인자를 받을 수 있지만 해당 플랫폼의 실행 검증은 별도로 해야 합니다.
+이전 사용자 보고에서 Windows Rider의 창 열기·닫기가 확인됐습니다. 이번 변경에서는 Rider/Hermes 및 GUI 입력을 검증하지 않았습니다. macOS/Linux용 설정은 경로 인자를 받을 수 있지만 해당 플랫폼의 실행 검증은 별도로 해야 합니다.
+
+설치 설명인 이 문서 대신 `examples/opencode/OPENCODE_CUA_AUTOMATION_KO.md`의 짧은 작업 지침을 모델에 전달합니다. 사용자 지정 config에는 지침을 그 config 옆에 설치합니다. 현재 CUA 설치기의 `~/.cua-driver/packages/current` 경로를 탐색하며 명시한 실행 파일이 없으면 다른 버전으로 대체하지 않습니다.

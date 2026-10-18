@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import hashlib
 import json
 import os
 import re
@@ -27,6 +28,10 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT))
+from tools.configure_opencode_cua_automation import locate_cua_driver, prepare_configuration
+from tools.configure_opencode_session_recovery import configure_policy, DEFAULT_SOURCE as RECOVERY_SOURCE
+
 EXAMPLE_DIR = REPO_ROOT / "examples" / "opencode"
 PROFILE_FILE = EXAMPLE_DIR / "autonomous-agent-v2.fragment.json"
 INSTRUCTIONS_FILE = EXAMPLE_DIR / "KOREAN_INSTRUCTIONS.md"
@@ -145,7 +150,6 @@ def build_overlay(
     model: dict[str, Any],
     health: dict[str, Any],
     home: Path,
-    cua_driver: Path | None = None,
 ) -> dict[str, Any]:
     try:
         config = json.loads(PROFILE_FILE.read_text(encoding="utf-8"))
@@ -157,6 +161,7 @@ def build_overlay(
     config["$schema"] = SCHEMA_URL
     config["instructions"] = [_tilde_path(client_dir(home) / "KOREAN_INSTRUCTIONS.md", home)]
     config["model"] = f"{PROVIDER_ID}/{MODEL_KEY}"
+    config["shell"] = ("pwsh" if shutil.which("pwsh") else "powershell") if os.name == "nt" else "/bin/bash"
 
     context = health.get("max_context")
     limit: dict[str, int] = {}
@@ -175,7 +180,9 @@ def build_overlay(
         ],
     }
     if limit:
+        limit["output"] = min(32000, max(1, context // 4))
         model_config["limit"] = limit
+    configure_policy(config, context if limit else 262144)
 
     providers = config.setdefault("providers", {})
     if not isinstance(providers, dict):
@@ -191,17 +198,8 @@ def build_overlay(
         },
         "models": {MODEL_KEY: model_config},
     }
-    if cua_driver is not None:
-        mcp = config.setdefault("mcp", {})
-        if not isinstance(mcp, dict):
-            raise SetupError("프로필의 mcp 항목은 객체여야 합니다.")
-        servers = mcp.setdefault("servers", {})
-        if not isinstance(servers, dict):
-            raise SetupError("프로필의 mcp.servers 항목은 객체여야 합니다.")
-        servers[CUA_SERVER_ID] = {
-            "type": "local",
-            "command": [str(cua_driver.resolve()), "mcp"],
-        }
+    # CUA is rendered through the shared window-scoped installer in write_setup.
+
     return config
 
 
@@ -314,36 +312,6 @@ def locate_opencode(explicit: str | None) -> Path | None:
     if not path.exists():
         return None
     return path.resolve()
-
-
-def locate_cua_driver(home: Path) -> Path | None:
-    candidates: list[Path] = []
-    for name in ("cua-driver.exe", "cua-driver"):
-        located = shutil.which(name)
-        if located:
-            candidates.append(Path(located))
-    if os.name == "nt":
-        local_app_data = Path(os.environ.get("LOCALAPPDATA", home / "AppData" / "Local"))
-        candidates.extend(
-            [
-                local_app_data / "Programs" / "Cua" / "cua-driver" / "bin" / "cua-driver.exe",
-                local_app_data / "Programs" / "trycua" / "cua-driver-rs" / "bin" / "cua-driver.exe",
-            ]
-        )
-    elif sys.platform == "darwin":
-        candidates.extend(
-            [
-                home / ".local" / "bin" / "cua-driver",
-                Path("/Applications/CuaDriver.app/Contents/MacOS/cua-driver"),
-            ]
-        )
-    for candidate in candidates:
-        try:
-            if candidate.is_file():
-                return candidate.resolve()
-        except OSError:
-            continue
-    return None
 
 
 def download_official_installer(url: str, destination: Path) -> None:
@@ -598,8 +566,20 @@ def write_setup(
     acp = acp_path(home)
     # Validate existing ACP before writing any local client configuration.
     load_acp(acp)
-    config = build_overlay(base_url, model, health, home, cua_driver)
-    encoded_overlay = (json.dumps(config, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    config = build_overlay(base_url, model, health, home)
+    recovery_dest = client_dir(home) / "STRATA_SESSION_RECOVERY_KO.md"
+    config["instructions"].append(_tilde_path(recovery_dest, home))
+    files = {recovery_dest: RECOVERY_SOURCE.read_bytes()}
+    if cua_driver is not None:
+        try:
+            _, cua_files = prepare_configuration(
+                overlay_path(home), client_dir(home) / "cua-driver",
+                client_dir(home) / "KOREAN_INSTRUCTIONS.md",
+                driver_path=cua_driver, config_document=config)
+        except (ValueError, OSError) as exc:
+            raise SetupError(str(exc)) from exc
+        files.update(cua_files)
+        config = json.loads(files[overlay_path(home).resolve()])
 
     # Validate all generated state before touching the credential or ACP file.
     instructions_dest = client_dir(home) / "KOREAN_INSTRUCTIONS.md"
@@ -607,8 +587,23 @@ def write_setup(
     wrapper, acp_command, acp_args, launcher_data, launcher_mode = build_launcher(home, opencode)
     acp_config, agent_name = merge_acp(acp, acp_command, acp_args)
 
-    atomic_write(instructions_dest, instructions_bytes)
-    atomic_write(overlay_path(home), encoded_overlay)
+    # Render/read all assets before writing credentials or publishing the ACP entry.
+    files[instructions_dest] = instructions_bytes
+    for name in ("run_bounded_command.ps1", "run_bounded_command.sh"):
+        files[client_dir(home) / "scripts" / name] = (REPO_ROOT / "tools/opencode" / name).read_bytes().replace(b"\r\n", b"\n")
+    runner_instructions = client_dir(home) / "TERMINAL_KO.md"
+    config["instructions"].append(_tilde_path(runner_instructions, home))
+    scripts = client_dir(home) / "scripts"
+    files[runner_instructions] = (
+        "# 터미널 실행\n"
+        "빌드·테스트는 비대화형으로 실행하고 timeout·종료 코드·로그를 확인한다.\n"
+        f"Windows PowerShell 7: & {_powershell_literal(str(scripts / 'run_bounded_command.ps1'))} -WorkingDirectory (Get-Location).Path -TimeoutSeconds 900 -Command '프로젝트 검증 명령'\n"
+        f"Linux/macOS: bash {_shell_literal((scripts / 'run_bounded_command.sh').as_posix())} --timeout 900 -- 검증명령\n"
+        "macOS에서는 GNU timeout(gtimeout)이 필요하다. 없으면 설치된 실행기의 제한 시간 기능을 사용하고 무제한으로 우회하지 않는다. WSL에서는 Linux에 설치된 도구와 작업 디렉터리를 사용한다.\n"
+    ).encode("utf-8")
+    files[overlay_path(home).resolve()] = (json.dumps(config, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    for path, data in files.items():
+        atomic_write(path, data)
     write_secret(key_path(home), key)
     atomic_write(wrapper, launcher_data, mode=launcher_mode)
     if os.name != "nt":
@@ -629,6 +624,9 @@ def write_setup(
         "launcher": str(wrapper),
         "cua_driver_executable": str(cua_driver) if cua_driver else None,
         "cua_driver_setup_status": cua_status,
+        "cua_mcp": config.get("mcp", {}).get("servers", {}).get(CUA_SERVER_ID),
+        "setup_revision": 2,
+        "asset_sha256": {str(path): hashlib.sha256(data).hexdigest() for path, data in files.items()},
     }
     atomic_write(state_path(home), (json.dumps(state, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
     return agent_name
@@ -735,6 +733,20 @@ def _check_windows_secret(path: Path) -> bool:
     return len(entries) == 1 and current in entries[0] and "(f)" in entries[0]
 
 
+def check_assets(state: dict[str, Any]) -> list[str]:
+    hashes = state.get("asset_sha256")
+    if not isinstance(hashes, dict) or not hashes:
+        return ["설치 파일 영수증이 없습니다. 통합 setup을 다시 실행하세요."]
+    errors = []
+    for path, expected in hashes.items():
+        try:
+            if hashlib.sha256(Path(path).read_bytes()).hexdigest() != expected:
+                errors.append(f"설치 후 변경됨: {path}")
+        except OSError:
+            errors.append(f"설치 파일을 읽을 수 없음: {path}")
+    return errors
+
+
 def do_doctor(args: argparse.Namespace) -> int:
     home = Path(args.home).expanduser() if args.home else Path.home()
     state_file = state_path(home)
@@ -749,6 +761,12 @@ def do_doctor(args: argparse.Namespace) -> int:
         raise SetupError("클라이언트 영수증과 OpenCode overlay의 최상위 값은 JSON 객체여야 합니다.")
 
     failures = 0
+    asset_errors = check_assets(state)
+    for error in asset_errors:
+        print(f"FAIL {error}")
+    failures += len(asset_errors)
+    if not asset_errors:
+        print("PASS 설치 지침·중계기·정책·실행기 파일이 setup 영수증과 일치합니다.")
     key_file = Path(state.get("key_file", key_path(home)))
     if key_file.exists():
         if os.name == "nt":
@@ -831,9 +849,9 @@ def do_doctor(args: argparse.Namespace) -> int:
     else:
         cua_executable = Path(cua_executable_value)
         mcp = config.get("mcp")
-        mcp_servers = mcp.get("servers") if isinstance(mcp, dict) else None
-        cua_entry = mcp_servers.get(CUA_SERVER_ID) if isinstance(mcp_servers, dict) else None
-        expected_command = [str(cua_executable), "mcp"]
+        cua_entry = mcp.get("servers", {}).get(CUA_SERVER_ID) if isinstance(mcp, dict) else None
+        expected_entry = state.get("cua_mcp")
+        expected_command = expected_entry.get("command") if isinstance(expected_entry, dict) else None
         if not cua_executable.is_file():
             print(f"FAIL CUA Driver 실행 파일을 찾을 수 없습니다: {cua_executable}")
             failures += 1
@@ -841,7 +859,10 @@ def do_doctor(args: argparse.Namespace) -> int:
             not isinstance(cua_entry, dict)
             or cua_entry.get("type") != "local"
             or cua_entry.get("command") != expected_command
-            or cua_entry.get("disabled") is True
+            or cua_entry != expected_entry
+            or cua_entry.get("disabled") is not False
+            or not expected_command
+            or not all(Path(path).is_file() for path in expected_command)
         ):
             print("FAIL OpenCode overlay에 CUA Driver MCP 명령이 영수증과 일치하게 등록되지 않았습니다.")
             failures += 1

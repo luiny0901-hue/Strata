@@ -4,6 +4,8 @@
 param()
 
 $ErrorActionPreference = 'Stop'
+$helperPath = Join-Path $PSScriptRoot 'strata_firewall_helpers.ps1'
+. $helperPath
 $allowRuleName = 'StrataOpenCodeLan8080'
 $blockRuleName = 'StrataOpenCodeNotPrivate8080'
 $displayName = 'Strata OpenCode API - Private LAN only'
@@ -27,11 +29,20 @@ $serverPythonPaths = @(
     [System.IO.Path]::GetFullPath((Join-Path (Join-Path $env:USERPROFILE 'Strata') '.venv\Scripts\python.exe'))
 )
 $legacyRulesToRestrict = @()
+$tailscaleRuleCount = 0
 $enabledAllows = @(Get-NetFirewallRule -PolicyStore ActiveStore -Direction Inbound -Action Allow -Enabled True)
 foreach ($candidate in $enabledAllows) {
     if ($candidate.Name -eq $allowRuleName) { continue }
-    $profileNames = @($candidate.Profile | ForEach-Object { "$($_)".Split(',') })
+    if (Test-StrataTailscaleScopedAllowRule -Rule $candidate) {
+        $tailscaleRuleCount++
+        continue
+    }
+
+    $profileNames = @(ConvertTo-StrataFirewallValue -Values @($candidate.Profile))
     if (-not ($profileNames -contains 'Any' -or $profileNames -contains 'Private')) { continue }
+
+    # This rule is scoped to a packaged Windows app, not the venv Python Strata server.
+    if ($candidate.PackageFamilyName) { continue }
 
     $applicationFilter = $candidate | Get-NetFirewallApplicationFilter
     $program = [Environment]::ExpandEnvironmentVariables([string]$applicationFilter.Program).Trim('"')
@@ -47,23 +58,10 @@ foreach ($candidate in $enabledAllows) {
     if ($service -and $service -notin @('Any', '*')) { continue }
 
     $ports = @($candidate | Get-NetFirewallPortFilter)
-    $port8080 = $false
-    foreach ($portFilter in $ports) {
-        if ($portFilter.Protocol -notin @('TCP', '6', 'Any', '256')) { continue }
-        foreach ($port in @($portFilter.LocalPort)) {
-            $text = [string]$port
-            if ($text -eq 'Any' -or $text -eq '8080') { $port8080 = $true; break }
-            if ($text -match '^(\d+)-(\d+)$' -and [int]$Matches[1] -le 8080 -and [int]$Matches[2] -ge 8080) {
-                $port8080 = $true
-                break
-            }
-        }
-        if ($port8080) { break }
-    }
-    if (-not $port8080) { continue }
+    if (-not (Test-StrataFirewallRuleIncludesTcp8080 -Rule $candidate)) { continue }
 
     $remoteAddresses = @($candidate | Get-NetFirewallAddressFilter | ForEach-Object { $_.RemoteAddress })
-    $remoteValues = @($remoteAddresses | ForEach-Object { $_ -split ',' })
+    $remoteValues = @(ConvertTo-StrataFirewallValue -Values $remoteAddresses)
     if (-not $remoteValues -or $remoteValues -contains 'Any' -or $remoteValues -contains '*') {
         $exactLegacyPort = $ports.Count -eq 1 -and
             $ports[0].Protocol -eq 'TCP' -and
@@ -143,4 +141,9 @@ if ($allowRule) {
 
 Write-Output "Applied firewall rule: $($allowRule.DisplayName)"
 Write-Output "Applied firewall rule: $($blockRule.DisplayName)"
-Write-Output 'Allow: TCP 8080, Private profile, RemoteAddress=LocalSubnet. Block: Domain/Public profiles.'
+Write-Output 'LAN allow: TCP 8080, Private profile, RemoteAddress=LocalSubnet. Block: Domain/Public profiles.'
+if ($tailscaleRuleCount -gt 0) {
+    Write-Output "Tailscale: preserved $tailscaleRuleCount existing Tailscale-In rule(s) bound to current Tailscale interface address(es); they may permit broader inbound traffic than Strata TCP 8080, so review Tailscale peer ACLs."
+} else {
+    Write-Output 'Tailscale: no matching existing Tailscale-In path was found; only LAN access is configured by this script.'
+}

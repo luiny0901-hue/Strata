@@ -35,11 +35,11 @@ class LauncherImageBudgetTests(unittest.TestCase):
                 self.assertEqual(contents.count("--image-max-tokens 1024"), 1)
                 self.assertEqual(contents.count("--image-max-tokens"), 1)
                 self.assertIn(f"render-profile --mode {mode}", contents)
-                self.assertIn("Vision encoder defaults to CPU.", contents)
+                self.assertIn("Vision encoding uses CPU.", contents)
                 self.assertIn("check_strata_lan_firewall.ps1", contents)
                 self.assertIn("exit /b 25", contents)
                 self.assertIn(
-                    "docs/reports/2026-10-17-iq4xs-vision-cpu-gpu-comparison.md",
+                    "The comparison sent no image.",
                     contents,
                 )
 

@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+if [ "$#" -eq 0 ]; then set -- setup; fi
 
 if ! command -v python3 >/dev/null 2>&1; then
   printf '%s\n' 'Python 3 is required. Install Python 3 for this user, then rerun this script.' >&2

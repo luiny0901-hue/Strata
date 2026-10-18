@@ -11,6 +11,15 @@ const inputTools = new Set([
   "type_text", "press_key", "hotkey", "set_value",
 ]);
 
+export function prepareCall(name, args) {
+  // Reproduce the selected client image budget without overwriting driver-wide settings.
+  if (name === "get_window_state" && args.include_screenshot !== false
+      && args.max_image_dimension === undefined && args.max_dimension === undefined) {
+    return { ...args, max_image_dimension: 1920 };
+  }
+  return args;
+}
+
 export function exactWindow(args) {
   if (args.scope === "desktop") return false;
   if (args.target !== undefined) {

@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "opencode" / "opencode.json"
-DEFAULT_SOURCE = Path(__file__).resolve().parents[1] / "docs" / "OPENCODE_SESSION_RECOVERY_KO.md"
+DEFAULT_SOURCE = Path(__file__).resolve().parents[1] / "examples" / "opencode" / "STRATA_SESSION_RECOVERY_KO.md"
 INSTALLED_INSTRUCTIONS_NAME = "STRATA_SESSION_RECOVERY_KO.md"
 
 
@@ -66,6 +66,17 @@ def _reference_for(target: Path) -> str:
     return "~/" + relative.as_posix()
 
 
+def configure_policy(updated: dict[str, Any], context: int = 262144) -> None:
+    """Shared opt-in policy; reserve scales down for smaller remote servers."""
+    compaction = _mapping(updated, "compaction", "compaction")
+    keep = _mapping(compaction, "keep", "compaction.keep")
+    build = _mapping(_mapping(updated, "agents", "agents"), "build", "agents.build")
+    compaction["auto"] = True
+    keep["tokens"] = min(12000, context // 8)
+    compaction["buffer"] = min(65536, context // 4)
+    build["steps"] = 60
+
+
 def apply_config(
     config_path: Path,
     source_instructions: Path = DEFAULT_SOURCE,
@@ -95,10 +106,7 @@ def apply_config(
         config = {}
 
     updated = copy.deepcopy(config)
-    compaction = _mapping(updated, "compaction", "compaction")
-    keep = _mapping(compaction, "keep", "compaction.keep")
-    agents = _mapping(updated, "agents", "agents")
-    build = _mapping(agents, "build", "agents.build")
+    configure_policy(updated)
     instructions = updated.get("instructions", [])
     if isinstance(instructions, str):
         instructions = [instructions]
@@ -111,10 +119,6 @@ def apply_config(
     if reference not in instructions:
         instructions.append(reference)
 
-    compaction["auto"] = True
-    keep["tokens"] = 12000
-    compaction["buffer"] = 65536
-    build["steps"] = 60
     updated["instructions"] = instructions
 
     config_changed = updated != config

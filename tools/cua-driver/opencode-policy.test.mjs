@@ -29,3 +29,11 @@ test("rejects unsupported delivery modes and malformed window targets", () => {
 test("does not expose process termination", () => {
   assert.equal(isSafeCall("kill_app", { pid: 30216 }), false);
 });
+
+import { prepareCall } from "./opencode-policy.mjs";
+test("1920 image budget preserves explicit requests and tree-only reads", () => {
+  assert.equal(prepareCall("get_window_state", {pid: 1, window_id: 2}).max_image_dimension, 1920);
+  assert.equal(prepareCall("get_window_state", {max_image_dimension: 0}).max_image_dimension, 0);
+  assert.equal(prepareCall("get_window_state", {max_dimension: 1280}).max_image_dimension, undefined);
+  assert.equal(prepareCall("get_window_state", {include_screenshot: false}).max_image_dimension, undefined);
+});

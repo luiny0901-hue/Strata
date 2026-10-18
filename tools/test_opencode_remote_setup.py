@@ -29,9 +29,9 @@ class RemoteOpenCodeTemplateTests(unittest.TestCase):
                 self.assertEqual(document["shell"], shell)
                 self.assertEqual(provider["settings"]["baseURL"], HOST_URL)
                 self.assertEqual(provider["settings"]["apiKey"], KEY_FILE)
-                self.assertEqual(document["compaction"]["keep"]["tokens"], 20000)
-                self.assertEqual(document["compaction"]["buffer"], 32768)
-                self.assertEqual(document["agents"]["build"]["steps"], 100)
+                self.assertEqual(document["compaction"]["keep"]["tokens"], 12000)
+                self.assertEqual(document["compaction"]["buffer"], 65536)
+                self.assertEqual(document["agents"]["build"]["steps"], 60)
                 self.assertEqual(
                     document["mcp"]["servers"]["cua-driver"]["command"],
                     ["cua-driver", "mcp"],
@@ -54,7 +54,7 @@ class RemoteOpenCodeTemplateTests(unittest.TestCase):
         self.assertIn("No server was started", checker)
         self.assertIn("llama-server-8080", installer)
         self.assertIn("llama.cpp API 8080 LAN", installer)
-        self.assertIn("Set-NetFirewallAddressFilter -RemoteAddress LocalSubnet", installer)
+        self.assertIn("Set-NetFirewallRule", installer)
         self.assertNotIn("Remove-NetFirewallRule", installer)
 
     def test_setup_guide_uses_official_cua_driver_installers(self) -> None:

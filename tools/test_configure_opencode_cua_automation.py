@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -23,6 +24,8 @@ from tools.configure_opencode_cua_automation import (  # noqa: E402
     OLD_STOP_PREFIX,
     OLD_STABILITY_PREFIX,
     apply_configuration,
+    locate_cua_driver,
+    prepare_configuration,
 )
 
 
@@ -43,11 +46,11 @@ class CuaInstallerTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         self.repo = self.root / "repo"
-        (self.repo / "docs").mkdir(parents=True)
+        (self.repo / "examples/opencode").mkdir(parents=True)
         (self.repo / "tools" / "cua-driver").mkdir(parents=True)
-        for name in ("opencode-mcp.mjs", "opencode-policy.mjs", "opencode-window-scoped.rego"):
+        for name in ("opencode-mcp.mjs", "opencode-catalog.mjs", "opencode-policy.mjs", "opencode-window-scoped.rego"):
             (self.repo / "tools" / "cua-driver" / name).write_text(f"template {name}\n", encoding="utf-8")
-        (self.repo / "docs" / "OPENCODE_CUA_AUTOMATION_KO.md").write_text("CUA instructions\n", encoding="utf-8")
+        (self.repo / "examples/opencode" / "OPENCODE_CUA_AUTOMATION_KO.md").write_text("CUA instructions\n", encoding="utf-8")
         self.config = self.root / "opencode.json"
         self.cua_dir = self.root / "cua-driver"
         self.korean = self.root / "KOREAN_INSTRUCTIONS.md"
@@ -94,16 +97,17 @@ class CuaInstallerTests(unittest.TestCase):
         result = apply_configuration(self.config, self.cua_dir, self.korean, self.node, self.driver, self.repo)
 
         config = json.loads(self.config.read_text(encoding="utf-8"))
-        server = config["mcp"]["cua-driver"]
+        server = config["mcp"]["servers"]["cua-driver"]
         self.assertEqual(server["command"], [str(self.node.resolve()), str(wrapper.resolve())])
         self.assertEqual(server["environment"]["CUA_DRIVER_EXE"], str(self.driver.resolve()))
         self.assertEqual(server["environment"]["CUA_DRIVER_POLICY_FILE"], str((self.cua_dir / "opencode-window-scoped.rego").resolve()))
         self.assertEqual(server["environment"]["CUA_DRIVER_PERMISSION_MODE"], "standard")
         self.assertEqual(server["environment"]["OTHER"], "keep")
-        self.assertTrue(server["enabled"])
-        self.assertNotIn("disabled", server)
-        self.assertEqual(config["mcp"]["github"], {"type": "remote", "url": "https://example.invalid/mcp"})
-        self.assertNotIn("servers", config["mcp"])
+        self.assertFalse(server["disabled"])
+        self.assertFalse(server["codemode"])
+        self.assertNotIn("enabled", server)
+        self.assertEqual(config["mcp"]["servers"]["github"], {"type": "remote", "url": "https://example.invalid/mcp"})
+        self.assertNotIn("cua-driver", config["mcp"])
         self.assertEqual(config["model"], "strata/model")
         self.assertEqual(config["providers"]["strata"]["apiKey"], "sentinel-secret")
         self.assertEqual(config["providers"]["strata"]["models"]["model"]["limit"], {"context": 262144, "output": 32000})
@@ -193,6 +197,34 @@ class CuaInstallerTests(unittest.TestCase):
         self.assertEqual(original, self.config.read_bytes())
         self.assertEqual(OLD_GUI_RULES, self.korean.read_text(encoding="utf-8"))
         self.assertFalse(self.cua_dir.exists())
+
+    def test_unrelated_korean_instructions_are_preserved(self):
+        self.korean.write_text("한국어로 설명하고 파일을 보존한다.\n", encoding="utf-8")
+        original = self.korean.read_bytes()
+        apply_configuration(self.config, self.cua_dir, self.korean, self.node, self.driver, self.repo)
+        self.assertEqual(original, self.korean.read_bytes())
+
+    def test_custom_config_gets_instructions_beside_it_and_preflight_does_not_write(self):
+        config = self.root / "custom profile" / "agent.json"
+        result, files = prepare_configuration(config, self.cua_dir, self.korean, self.node,
+                                             self.driver, self.repo, {"model": "keep"})
+        self.assertFalse(config.exists())
+        self.assertFalse(self.cua_dir.exists())
+        self.assertEqual(Path(result["instructions_path"]).parent, config.parent)
+        document = json.loads(files[config])
+        self.assertEqual(document["model"], "keep")
+
+    def test_missing_explicit_driver_does_not_fall_back_to_another_version(self):
+        with self.assertRaisesRegex(ValueError, "Explicit runtime"):
+            apply_configuration(self.config, self.cua_dir, self.korean, self.node,
+                                self.root / "missing.exe", self.repo)
+        self.assertFalse(self.config.exists())
+
+    def test_driver_installer_current_pointer_is_discovered(self):
+        driver = self.root / ".cua-driver/packages/current" / ("cua-driver.exe" if os.name == "nt" else "cua-driver")
+        driver.parent.mkdir(parents=True)
+        driver.write_bytes(b"fixture")
+        self.assertEqual(locate_cua_driver(self.root), driver.resolve())
 
 
 if __name__ == "__main__":
