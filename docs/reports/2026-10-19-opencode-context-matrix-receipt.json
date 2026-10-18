@@ -52,13 +52,15 @@
     }
   ],
   "additional_regression_attempt": {
-    "command": "python -m unittest discover -s tools -p test_*.py -v",
-    "result": "FAILED",
-    "summary": "855 tests ran; 6 errors; 13 expected platform skips.",
-    "unrelated_failures": [
-      "test_iq_pack requires missing third_party/llama.cpp/gguf-py.",
-      "five test_strata_bench ReportTests read CMakeLists.txt with the Windows cp949 default and fail on its UTF-8 BOM."
-    ],
-    "scope_assessment": "The errors are outside OpenCode compaction/session-recovery ownership. The focused 23 tests and the five-context CLI workflow verifier passed."
+    "initial_command": "python -m unittest discover -s tools -p test_*.py -v",
+    "initial_result": "FAILED",
+    "initial_summary": "855 tests ran; 6 errors; 13 expected platform skips.",
+    "fix_applied": "tools/strata_bench.py now reads the UTF-8 BOM CMakeLists.txt with encoding=utf-8-sig.",
+    "corrective_validation": {
+      "command": "python -m unittest tools.test_strata_bench tools.test_opencode_session_recovery tools.test_verify_opencode_262k_workflow tools.test_verify_opencode_context_matrix tools.test_remote_agent_client -v",
+      "result": "PASS",
+      "summary": "40 tests passed."
+    },
+    "remaining_unverified_full_suite_item": "test_iq_pack requires missing third_party/llama.cpp/gguf-py; the full 855-test suite was not rerun after the encoding fix."
   }
 }
