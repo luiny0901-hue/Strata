@@ -57,6 +57,20 @@ class ReaIntegrationTests(unittest.TestCase):
             self.assertEqual(configured["agent"]["rea_analysis"], rea.REA_AGENT)
             self.assertFalse(rea.apply_tool_scope(config))
 
+    def test_tool_scope_migrates_the_previous_rea_agent_definition(self):
+        import json
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as temporary:
+            config = Path(temporary) / "opencode.json"
+            config.write_text(
+                json.dumps({"tools": {"rea_*": False}, "agent": {"rea_analysis": rea.LEGACY_REA_AGENT}}),
+                encoding="utf-8",
+            )
+            self.assertTrue(rea.apply_tool_scope(config))
+            configured = json.loads(config.read_text(encoding="utf-8"))
+            self.assertEqual(configured["agent"]["rea_analysis"], rea.REA_AGENT)
+
     def test_tool_scope_verifier_rejects_missing_scoped_agent(self):
         import json
         import tempfile

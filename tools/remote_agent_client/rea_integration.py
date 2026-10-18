@@ -22,10 +22,25 @@ REA_PACKAGE = f"rea-agents@{REA_VERSION}"
 REA_CLIENT = "opencode"
 REA_TOOL_GLOB = "rea_*"
 REA_AGENT_NAME = "rea_analysis"
-REA_AGENT = {
+LEGACY_REA_AGENT = {
     "description": "Use REA to inspect authorized binaries, applications, or artifacts and return evidence.",
     "mode": "subagent",
     "tools": {REA_TOOL_GLOB: True},
+}
+REA_AGENT = {
+    "description": (
+        "Automatically select this subagent when the user asks to analyze, inspect, "
+        "reverse engineer, compare, or investigate an authorized local executable, DLL, "
+        "installer, APK, Electron/JavaScript application, ASAR, or other binary artifact. "
+        "Use REA read-only and report evidence in Korean."
+    ),
+    "mode": "subagent",
+    "tools": {REA_TOOL_GLOB: True},
+    "prompt": (
+        "Use REA only for artifacts the user is authorized to inspect. Never modify, execute, "
+        "launch, install, upload, or delete the target. Select the narrowest suitable REA "
+        "analysis route, distinguish evidence from inference, and report findings in Korean."
+    ),
 }
 
 
@@ -103,7 +118,7 @@ def apply_tool_scope(config_path: Path) -> bool:
     if not isinstance(tools, dict) or not isinstance(agents, dict):
         raise ReaSetupError("OpenCode의 tools 또는 agent 설정 형식이 예상과 다릅니다.")
     existing = agents.get(REA_AGENT_NAME)
-    if existing is not None and existing != REA_AGENT:
+    if existing is not None and existing not in (LEGACY_REA_AGENT, REA_AGENT):
         raise ReaSetupError(
             f"OpenCode agent '{REA_AGENT_NAME}'이 이미 다른 설정으로 존재합니다. 기존 설정을 보존했습니다."
         )

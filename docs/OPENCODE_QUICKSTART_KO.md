@@ -35,7 +35,7 @@ UAC 확인 창은 운영체제 보안 데스크톱이므로 에이전트가 누�
 2. Windows: `SETUP-OPENCODE.bat` 더블클릭. Mac: `sh setup-opencode.sh`.
 3. 서버 주소와 API 키를 입력합니다. 같은 서버 PC는 `127.0.0.1:8080`, 외부 PC는 서버의 LAN/Tailscale 주소를 사용합니다. `/health`와 `/v1/models`에서 실제 모델과 context를 읽습니다.
 4. CUA가 없으면 설치기가 공식 설치 동의를 묻습니다. CUA는 화면을 조작할 클라이언트에 설치됩니다. Mac의 화면 기록·손쉬운 사용 권한은 직접 승인해야 합니다.
-5. REA 등록 여부를 묻으면 기본 선택을 수락하세요. REA는 `rea_analysis` subagent에서만 활성화되므로 일반 코딩 세션의 도구 컨텍스트를 불필요하게 늘리지 않습니다.
+5. REA 등록 여부를 묻으면 기본 선택을 수락하세요. 권한 있는 실행 파일·DLL·설치 프로그램·APK·Electron/ASAR 등 바이너리 아티팩트의 분석·검사·역공학·비교 요청은 `rea_analysis` subagent가 자동 선택됩니다. REA는 일반 코딩 세션에서는 비활성이라 도구 컨텍스트를 불필요하게 늘리지 않습니다.
 6. 생성된 `~/.config/opencode/strata-client/bin/opencode-strata.ps1`(Windows) 또는 `opencode-strata`(Mac)로 OpenCode를 실행합니다. 이 wrapper가 생성 overlay를 지정합니다. 기존 글로벌 설정·프로젝트 설정과 병합되므로 다른 진입점이 동일 overlay를 쓰는지 확인하세요.
 
 이 경로는 세션 복구, REA 전용 분석 subagent, 60단계 작업 구간, 자동 압축(선택 모델 context의 1/8 최근 보존과 1/4 여유, 각각 최대 12000/65536), 제한 시간 셸 도우미, 짧은 한국어 지침, 창 단위 CUA 중계기를 함께 설치합니다. 현재 사용자 계정에서 OpenCode 도구 권한은 전체 허용이므로 파일·셸·Git·외부 폴더·MCP 작업에 승인 대화가 없습니다. 기존 `setup`을 다시 실행해도 synthetic 설정 테스트에서 ACP 항목이 중복되지 않았습니다. 개별 파일은 백업 후 원자 교체하지만 전체 설치가 한 트랜잭션은 아닙니다. 오류가 나면 출력 원인을 수정한 뒤 setup을 재실행하고 doctor를 확인합니다.

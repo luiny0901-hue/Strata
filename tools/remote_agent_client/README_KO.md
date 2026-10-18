@@ -68,7 +68,7 @@ sh tools/remote_agent_client/setup-macos.sh doctor
 
 ## REA
 
-- REA는 로컬 파일, .NET 어셈블리, JavaScript/Electron 앱, 웹 페이지와 사용자가 권한을 가진 바이너리를 근거 중심으로 분석하는 MCP입니다. `rea_analysis` subagent는 REA가 필요한 분석일 때 자동 선택되거나 `@rea_analysis`로 직접 호출할 수 있습니다. 분석 대상의 라이선스와 권한은 사용자가 확인해야 합니다.
+- REA는 로컬 파일, .NET 어셈블리, JavaScript/Electron 앱, 웹 페이지와 사용자가 권한을 가진 바이너리를 근거 중심으로 분석하는 MCP입니다. 실행 파일·DLL·설치 프로그램·APK·Electron/ASAR 등 권한 있는 바이너리 아티팩트의 분석·검사·역공학·비교 요청에서는 `rea_analysis` subagent가 자동 선택되며, `@rea_analysis`로 직접 호출할 수도 있습니다. 일반 소스 코드·문서·이미지는 REA가 필요한 형식일 때만 위임합니다. 분석 대상의 라이선스와 권한은 사용자가 확인해야 합니다.
 - 설치기는 REA OpenCode 등록과 분석 지침만 추가합니다. REA CLI를 전역 설치하지 않으며, MCP는 고정된 npm 패키지를 `npx`로 시작합니다. 터미널 일회성 실행은 `npx -y rea-agents@6.7.0 --help`를 사용하세요.
 - `doctor`는 REA의 OpenCode 등록과 분석 지침만 범위 지정해 확인합니다. Ghidra, IDA, Hopper, JADX, Kuna가 설치되지 않은 경고는 해당 네이티브 분석 기능이 미구성이라는 뜻이며 OpenCode MCP 등록 실패로 취급하지 않습니다.
 - 재설치 후 REA를 사용하려면 setup에서 기본 선택을 수락하고 OpenCode와 Rider를 완전히 재시작하세요. 일반 Build 세션에는 `rea_*` 도구를 노출하지 않아 REA의 큰 도구 목록이 매 요청 컨텍스트를 불필요하게 차지하지 않습니다. 기존 OpenCode 설정의 REA 백업은 REA가 `opencode.json.rea.backup`으로 관리합니다.
