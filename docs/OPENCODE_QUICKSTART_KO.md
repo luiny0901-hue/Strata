@@ -57,5 +57,6 @@ UAC 확인 창은 운영체제 보안 데스크톱이므로 에이전트가 누�
 - [고정 NVFP4 + IQ4_XS 서버 복원](IQ4XS_NVFP4_OPENCODE_SETUP.md)
 - [LAN·Tailscale 및 플랫폼 경계](REMOTE_AGENT_CLIENTS_KO.md)
 - [클라이언트 상세 설정](../tools/remote_agent_client/README_KO.md)
+- [Unreal Engine · Unity 프로젝트 지침](GAME_ENGINE_OPENCODE_KO.md)
 
 BAT은 Windows 전용입니다. Linux 서버는 자체 설치·방화벽·GPU 경로를 별도 확인해야 하며 이 작업에서 실행하지 않았습니다. 서버를 공용 인터넷에 직접 공개하지 마세요. 키 인증과 Private LAN/Tailscale 제한을 유지합니다. 기존 LAN 방화벽의 공백 포함 프로필 판정/Tailscale 처리는 복원 브랜치에 함께 보존했으며 이번 작업에서 실제 방화벽을 변경하지 않았습니다.
