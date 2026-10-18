@@ -17,6 +17,7 @@ from typing import Any
 DEFAULT_CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "opencode" / "opencode.json"
 DEFAULT_SOURCE = Path(__file__).resolve().parents[1] / "examples" / "opencode" / "STRATA_SESSION_RECOVERY_KO.md"
 INSTALLED_INSTRUCTIONS_NAME = "STRATA_SESSION_RECOVERY_KO.md"
+DEFAULT_CONTEXT = 262_144
 
 # Elevation opens an OS-owned secure desktop or a credential prompt. An agent
 # cannot safely observe or complete it, so a pending elevation must never turn
@@ -87,14 +88,42 @@ def _reference_for(target: Path) -> str:
     return "~/" + relative.as_posix()
 
 
-def configure_policy(updated: dict[str, Any], context: int = 262144) -> None:
-    """Shared opt-in policy; reserve scales down for smaller remote servers."""
+def compaction_policy(context: int) -> dict[str, int]:
+    """Return a bounded compaction policy for one declared model context."""
+    if isinstance(context, bool) or not isinstance(context, int) or context < 4_096:
+        raise ValueError("model context must be an integer of at least 4096 tokens")
+    buffer = min(65_536, context // 4)
+    return {"keep": min(12_000, context // 8), "buffer": buffer, "trigger": context - buffer}
+
+
+def configured_model_context(config: dict[str, Any]) -> int:
+    """Read the selected model's declared context without guessing a server limit."""
+    selected = config.get("model")
+    if not isinstance(selected, str) or "/" not in selected:
+        return DEFAULT_CONTEXT
+    provider_id, model_id = selected.split("/", 1)
+    providers = config.get("providers")
+    provider = providers.get(provider_id) if isinstance(providers, dict) else None
+    models = provider.get("models") if isinstance(provider, dict) else None
+    model = models.get(model_id) if isinstance(models, dict) else None
+    limit = model.get("limit") if isinstance(model, dict) else None
+    context = limit.get("context") if isinstance(limit, dict) else None
+    try:
+        compaction_policy(context)
+    except ValueError:
+        return DEFAULT_CONTEXT
+    return context
+
+
+def configure_policy(updated: dict[str, Any], context: int = DEFAULT_CONTEXT) -> None:
+    """Shared opt-in policy; reserve scales down for the selected model."""
+    policy = compaction_policy(context)
     compaction = _mapping(updated, "compaction", "compaction")
     keep = _mapping(compaction, "keep", "compaction.keep")
     build = _mapping(_mapping(updated, "agents", "agents"), "build", "agents.build")
     compaction["auto"] = True
-    keep["tokens"] = min(12000, context // 8)
-    compaction["buffer"] = min(65536, context // 4)
+    keep["tokens"] = policy["keep"]
+    compaction["buffer"] = policy["buffer"]
     build["steps"] = 60
     policies = _rules(updated, "policies", "policies")
     for policy in UAC_DENY_POLICIES:
@@ -131,7 +160,8 @@ def apply_config(
         config = {}
 
     updated = copy.deepcopy(config)
-    configure_policy(updated)
+    context = configured_model_context(updated)
+    configure_policy(updated, context)
     instructions = updated.get("instructions", [])
     if isinstance(instructions, str):
         instructions = [instructions]
@@ -174,6 +204,7 @@ def apply_config(
         "instructions_changed": instruction_changed,
         "config_backup": str(config_backup) if config_backup else None,
         "instructions_backup": str(instruction_backup) if instruction_backup else None,
+        "context": context,
     }
 
 
@@ -189,6 +220,7 @@ def main() -> int:
         parser.error(str(error))
     print(f"Config: {result['config_path']}")
     print(f"Instructions: {result['instructions_path']}")
+    print(f"Compaction context: {result['context']}")
     print(f"Config changed: {result['config_changed']}")
     print(f"Instructions changed: {result['instructions_changed']}")
     if result["config_backup"]:

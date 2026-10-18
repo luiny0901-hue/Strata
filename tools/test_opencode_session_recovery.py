@@ -11,7 +11,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from tools.configure_opencode_session_recovery import DEFAULT_SOURCE, UAC_DENY_POLICIES, apply_config  # noqa: E402
+from tools.configure_opencode_session_recovery import (  # noqa: E402
+    DEFAULT_SOURCE,
+    UAC_DENY_POLICIES,
+    apply_config,
+    compaction_policy,
+    configured_model_context,
+)
 
 
 SOURCE = DEFAULT_SOURCE
@@ -82,6 +88,29 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(len(config["instructions"]), 1)
             self.assertTrue(config["instructions"][0].endswith("/STRATA_SESSION_RECOVERY_KO.md"))
             self.assertEqual(config["policies"], list(UAC_DENY_POLICIES))
+
+    def test_selected_small_model_scales_compaction_without_changing_its_provider(self):
+        with tempfile.TemporaryDirectory() as temp:
+            config_path = Path(temp) / "opencode.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "model": "fixture/small",
+                        "providers": {"fixture": {"models": {"small": {"limit": {"context": 8192}}}}},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = apply_config(config_path, SOURCE)
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            self.assertEqual(result["context"], 8_192)
+            self.assertEqual(config["compaction"], {"auto": True, "keep": {"tokens": 1_024}, "buffer": 2_048})
+            self.assertEqual(configured_model_context(config), 8_192)
+
+    def test_context_policy_rejects_invalid_values_and_unknown_models_use_safe_default(self):
+        with self.assertRaisesRegex(ValueError, "at least 4096"):
+            compaction_policy(2_048)
+        self.assertEqual(configured_model_context({"model": "missing/model"}), 262_144)
 
     def test_existing_policies_are_preserved_and_uac_denies_are_last(self):
         with tempfile.TemporaryDirectory() as temp:

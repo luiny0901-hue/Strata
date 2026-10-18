@@ -1,0 +1,64 @@
+{
+  "result": "PASS",
+  "recorded_at": "2026-10-19T07:40:00+09:00",
+  "verifier": "tools/verify_opencode_context_matrix.py",
+  "execution": "actual OpenCode CLI against an isolated loopback OpenAI-compatible fixture",
+  "scopes": {
+    "opencode_compaction": "PASS",
+    "initial_and_follow_up_file_work": "PASS",
+    "non_elevated_confirmation_resume": "PASS",
+    "production_strata_model_gpu": "NOT_RUN"
+  },
+  "contexts": [
+    {
+      "context": 8192,
+      "keep": 1024,
+      "buffer": 2048,
+      "trigger": 6144,
+      "requests": 10,
+      "checkpoints": 2
+    },
+    {
+      "context": 32768,
+      "keep": 4096,
+      "buffer": 8192,
+      "trigger": 24576,
+      "requests": 10,
+      "checkpoints": 2
+    },
+    {
+      "context": 65536,
+      "keep": 8192,
+      "buffer": 16384,
+      "trigger": 49152,
+      "requests": 10,
+      "checkpoints": 2
+    },
+    {
+      "context": 131072,
+      "keep": 12000,
+      "buffer": 32768,
+      "trigger": 98304,
+      "requests": 10,
+      "checkpoints": 2
+    },
+    {
+      "context": 262144,
+      "keep": 12000,
+      "buffer": 65536,
+      "trigger": 196608,
+      "requests": 10,
+      "checkpoints": 2
+    }
+  ],
+  "additional_regression_attempt": {
+    "command": "python -m unittest discover -s tools -p test_*.py -v",
+    "result": "FAILED",
+    "summary": "855 tests ran; 6 errors; 13 expected platform skips.",
+    "unrelated_failures": [
+      "test_iq_pack requires missing third_party/llama.cpp/gguf-py.",
+      "five test_strata_bench ReportTests read CMakeLists.txt with the Windows cp949 default and fail on its UTF-8 BOM."
+    ],
+    "scope_assessment": "The errors are outside OpenCode compaction/session-recovery ownership. The focused 23 tests and the five-context CLI workflow verifier passed."
+  }
+}

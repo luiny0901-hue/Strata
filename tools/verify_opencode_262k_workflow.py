@@ -2,8 +2,8 @@
 """Exercise a bounded OpenCode work-and-follow-up session against a local fake model.
 
 The verifier never contacts Strata or starts a model.  It gives OpenCode an
-OpenAI-compatible loopback endpoint that declares a 262,144-token model and
-records requests so the session and compaction policy can be inspected.
+OpenAI-compatible loopback endpoint with a declared context limit and records
+requests so the session and compaction policy can be inspected.
 """
 
 from __future__ import annotations
@@ -22,12 +22,29 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-MODEL_ID = "workflow-fixture-262k"
-CONTEXT_LIMIT = 262_144
-COMPACTION_KEEP = 12_000
-COMPACTION_BUFFER = 65_536
-COMPACTION_TRIGGER = CONTEXT_LIMIT - COMPACTION_BUFFER
+from tools.configure_opencode_session_recovery import DEFAULT_CONTEXT, compaction_policy
+
+MODEL_ID = "workflow-fixture"
+CONTEXT_LIMIT = DEFAULT_CONTEXT
+COMPACTION_KEEP = compaction_policy(CONTEXT_LIMIT)["keep"]
+COMPACTION_BUFFER = compaction_policy(CONTEXT_LIMIT)["buffer"]
+COMPACTION_TRIGGER = compaction_policy(CONTEXT_LIMIT)["trigger"]
+OUTPUT_LIMIT = min(32_000, max(1_024, CONTEXT_LIMIT // 4))
+
+
+def configure_context(context: int) -> None:
+    """Apply one isolated fixture context before the loopback server starts."""
+    global CONTEXT_LIMIT, COMPACTION_KEEP, COMPACTION_BUFFER, COMPACTION_TRIGGER, OUTPUT_LIMIT
+    policy = compaction_policy(context)
+    CONTEXT_LIMIT = context
+    COMPACTION_KEEP = policy["keep"]
+    COMPACTION_BUFFER = policy["buffer"]
+    COMPACTION_TRIGGER = policy["trigger"]
+    OUTPUT_LIMIT = min(32_000, max(1_024, context // 4))
 
 
 class FakeOpenAiServer(ThreadingHTTPServer):
@@ -257,7 +274,7 @@ def write_config(workdir: Path, base_url: str) -> Path:
                         "models": {
                             MODEL_ID: {
                                 "name": "Workflow fixture 262K",
-                                "limit": {"context": CONTEXT_LIMIT, "output": 32_000},
+                                "limit": {"context": CONTEXT_LIMIT, "output": OUTPUT_LIMIT},
                                 "capabilities": {"tools": True, "input": ["text"], "output": ["text"]},
                             }
                         },
@@ -382,7 +399,12 @@ def powershell_call(*paths: Path) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--keep-artifacts", action="store_true", help="print and retain the temporary fixture directory")
+    parser.add_argument("--context", type=int, default=CONTEXT_LIMIT, help="declared fixture context (at least 4096)")
     args = parser.parse_args()
+    try:
+        configure_context(args.context)
+    except ValueError as error:
+        parser.error(str(error))
     executable = shutil.which("opencode")
     if not executable:
         print("NOT_RUN: opencode executable was not found on PATH.", file=sys.stderr)

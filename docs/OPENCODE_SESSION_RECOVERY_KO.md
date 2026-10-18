@@ -19,12 +19,14 @@ python3 tools/configure_opencode_session_recovery.py
 ## 적용 값
 
 - 자동 context compaction을 켭니다.
-- 최근 대화 보존량을 12,000 토큰으로 설정합니다.
-- 모델의 context limit 아래 65,536 토큰을 compaction 여유로 둡니다. 262K 모델에서는 세션이 한도에 닿기 전에 요약을 시작합니다.
+- 선택된 OpenCode 모델의 `providers.<provider>.models.<model>.limit.context`를 읽습니다. 설정이 없거나 유효하지 않으면 기존 262,144 토큰 기준을 보수적으로 유지합니다.
+- 최근 대화 보존량은 `min(12,000, context / 8)`, compaction 여유는 `min(65,536, context / 4)`로 설정합니다. 따라서 8K/32K/64K/128K/262K는 각각 `1,024/2,048`, `4,096/8,192`, `8,192/16,384`, `12,000/32,768`, `12,000/65,536` (보존/여유)입니다.
 - Build agent의 최대 단계를 60으로 제한합니다. 제한에 도달하면 OpenCode가 도구를 제거하고 텍스트로 진행 상태를 요약합니다.
 - 아래의 한국어 복구 지침 파일을 OpenCode 전역 instructions 목록에 추가합니다.
 
 기존 provider, model, API key, 권한 및 기타 설정은 보존합니다. 실제 config는 저장소에 포함하지 않습니다. 변경 전 설정 백업은 config 파일 옆에 생성됩니다. 같은 도구를 다시 실행하면 이미 적용된 값은 중복 추가하지 않습니다.
+
+OpenCode 모델 또는 그 `limit.context`를 수동으로 바꾼 경우 이 설치기를 한 번 다시 실행해야 새 선택값에 맞춰 compaction 값이 갱신됩니다. 원격 클라이언트 설치기는 서버 `/health`가 보고한 context를 매 setup 때 읽어 같은 정책을 적용합니다.
 
 ## 세션 복구 규칙
 
@@ -60,12 +62,12 @@ Strata 로그의 done (stop, cancel=False)는 모델 생성 또는 도구 호출
 
 잘못된 config 형식이면 설치기는 수정을 거부하고 파일을 보존합니다. 복구가 필요하면 출력된 백업 파일을 이용해 이전 config를 복원할 수 있습니다. 자동으로 Strata 서버를 재시작하거나 GPU 작업을 실행하지 않습니다.
 
-## 262K 압축·수정 흐름 검증
+## 여러 context 길이의 압축·수정 흐름 검증
 
-다음 검증기는 OpenCode CLI의 실제 세션과 도구 호출을 임시 프로젝트에서 실행합니다. 262,144 토큰 모델 선언과 `auto=true`, 최근 대화 12,000 토큰 보존, 65,536 토큰 여유를 사용합니다. Provider가 196,608 토큰을 사용했다고 보고한 뒤 OpenCode가 다음 수정 요청 전에 `<conversation-checkpoint>`를 포함해 대화를 요약하는지, 파일 생성 뒤 같은 세션의 수정 요청이 끝까지 이어지는지를 검사합니다.
+다음 검증기는 OpenCode CLI의 실제 세션과 도구 호출을 임시 프로젝트에서 실행합니다. 8,192/32,768/65,536/131,072/262,144 토큰 모델 선언마다 새 세션을 만들고, 해당 context의 75%에 도달한 사용량을 fixture가 보고합니다. 다음 수정 요청 전에 OpenCode가 `<conversation-checkpoint>`를 포함해 대화를 요약하는지, 파일 생성 뒤 같은 세션의 수정 요청과 비관리자 확인 대기 후속 작업이 끝까지 이어지는지를 검사합니다.
 
 ~~~powershell
-& "$env:USERPROFILE\Strata\.venv\Scripts\python.exe" tools\verify_opencode_262k_workflow.py
+& "$env:USERPROFILE\Strata\.venv\Scripts\python.exe" tools\verify_opencode_context_matrix.py
 ~~~
 
-검증기는 loopback의 OpenAI 호환 fixture만 시작하며 운영 Strata 서버, 모델, GPU, Rider와 전역 OpenCode 설정을 바꾸지 않습니다. 따라서 OpenCode의 262K 정책·요약·도구 세션 경로 증거이지, 실제 Strata 모델의 장시간 품질·성능·GPU 안정성 증거는 아닙니다. 실제 모델 검증은 운영 서버를 사용하지 않는 별도 승인된 작업으로 기록합니다.
+검증기는 loopback의 OpenAI 호환 fixture만 시작하며 운영 Strata 서버, 모델, GPU, Rider와 전역 OpenCode 설정을 바꾸지 않습니다. 따라서 OpenCode의 context별 정책·요약·도구 세션 경로 증거이지, 실제 Strata 모델의 장시간 품질·성능·GPU 안정성 증거는 아닙니다. 실제 모델 검증은 운영 서버를 사용하지 않는 별도 승인된 작업으로 기록합니다.

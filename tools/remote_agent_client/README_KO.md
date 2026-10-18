@@ -78,4 +78,4 @@ sh tools/remote_agent_client/setup-macos.sh doctor
 
 ## 통합 개선 (2026-10-19)
 
-[빠른 시작](../../docs/OPENCODE_QUICKSTART_KO.md)을 기준으로 설치하세요. 기존 세션 복구·CUA 설치 모듈을 재사용해 60단계, 262K 기준 65536 여유/12000 최근 보존, 짧은 한국어 지침과 제한 시간 실행기를 함께 설치합니다. `doctor`는 저장된 중계기 명령과 드라이버 경로를 검사합니다. Mac 실제 동작과 Rider/Hermes 검증은 이번 작업에서 수행하지 않았습니다.
+[빠른 시작](../../docs/OPENCODE_QUICKSTART_KO.md)을 기준으로 설치하세요. 기존 세션 복구·CUA 설치 모듈을 재사용해 60단계와 서버 `/health`가 보고한 context의 1/8 최근 보존·1/4 여유(각각 최대 12000/65536), 짧은 한국어 지침과 제한 시간 실행기를 함께 설치합니다. `doctor`는 저장된 중계기 명령과 드라이버 경로를 검사합니다. Mac 실제 동작과 Rider/Hermes 검증은 이번 작업에서 수행하지 않았습니다.
