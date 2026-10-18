@@ -1,0 +1,47 @@
+export const exposedTools = new Set([
+  "list_apps", "list_windows", "get_window_state",
+  "start_session", "end_session",
+  "set_agent_cursor_enabled", "get_agent_cursor_state", "move_cursor",
+  "click", "double_click", "right_click", "drag", "scroll",
+  "type_text", "press_key", "hotkey", "set_value", "launch_app",
+]);
+
+const inputTools = new Set([
+  "click", "double_click", "right_click", "drag", "scroll",
+  "type_text", "press_key", "hotkey", "set_value",
+]);
+
+export function exactWindow(args) {
+  if (args.scope === "desktop") return false;
+  if (args.target !== undefined) {
+    return args.target?.kind === "window"
+      && Number.isInteger(args.target.pid) && args.target.pid > 0
+      && Number.isInteger(args.target.window_id) && args.target.window_id > 0;
+  }
+  if (typeof args.element_token === "string"
+      && /^s[0-9a-f]{8}:[0-9]+$/.test(args.element_token)) return true;
+  return args.scope === "window"
+    && Number.isInteger(args.pid) && args.pid > 0
+    && Number.isInteger(args.window_id) && args.window_id > 0;
+}
+
+export function isSafeCall(name, args) {
+  if (!exposedTools.has(name) || !args || typeof args !== "object" || Array.isArray(args)) return false;
+  if (name === "get_window_state") {
+    return Number.isInteger(args.pid) && args.pid > 0
+      && Number.isInteger(args.window_id) && args.window_id > 0
+      && args.screenshot_out_file === undefined;
+  }
+  if (name === "move_cursor") return exactWindow(args);
+  if (inputTools.has(name)) {
+    const supportedDelivery = args.delivery_mode === undefined
+      || args.delivery_mode === "background"
+      || args.delivery_mode === "foreground";
+    return supportedDelivery && exactWindow(args);
+  }
+  if (name === "set_agent_cursor_enabled") {
+    return typeof args.session === "string" && args.session.length > 0 && typeof args.enabled === "boolean";
+  }
+  if (name === "launch_app") return true;
+  return true;
+}

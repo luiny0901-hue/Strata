@@ -1,0 +1,323 @@
+#!/usr/bin/env python3
+"""Install the window-scoped OpenCode CUA policy and foreground escalation."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import stat
+import tempfile
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "opencode" / "opencode.json"
+DEFAULT_CUA_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "cua-driver"
+DEFAULT_INSTRUCTIONS = DEFAULT_CONFIG.parent / "KOREAN_INSTRUCTIONS.md"
+INSTRUCTIONS_NAME = "OPENCODE_CUA_AUTOMATION_KO.md"
+
+OLD_DELIVERY_PREFIX = "- \uC785\uB825\uC740 \uC815\uD655\uD55C \uCC3D \uB300\uC0C1\uC73C\uB85C `delivery_mode: "
+OLD_STOP_PREFIX = "- `background_unavailable`, 권한 거부, 창 식별 실패가 발생하면"
+NEW_DELIVERY_LINE = (
+    '- 입력은 정확한 창 PID/HWND 대상으로 `background`부터 시도한다. '
+    '드라이버의 `background_unavailable` 응답 또는 새 화면 상태에서 확인된 명백한 무동작 후에만 '
+    '같은 동작을 같은 창에 `delivery_mode: "foreground"`로 한 번 재시도할 수 있다.'
+)
+NEW_STOP_LINE = (
+    "- `foreground`는 대상 창을 잠시 활성화해 실제 입력을 전달한다. 사용자의 입력을 방해할 수 있거나 "
+    "창 정체·결과가 불명확하면 사용하지 않는다. 데스크톱 전체 대상, 전역 입력, 셸/네이티브 입력 우회는 계속 금지하며, "
+    "권한 거부나 확인되지 않은 결과에서는 멈춘다."
+)
+
+
+def _object(parent: dict[str, Any], key: str, label: str) -> dict[str, Any]:
+    value = parent.get(key)
+    if value is None:
+        value = {}
+        parent[key] = value
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be a JSON object; no files were changed.")
+    return value
+
+
+def _backup(path: Path) -> Path:
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    candidate = path.with_name(f"{path.name}.before-cua-automation-{stamp}.bak")
+    suffix = 1
+    while candidate.exists():
+        candidate = path.with_name(f"{path.name}.before-cua-automation-{stamp}-{suffix}.bak")
+        suffix += 1
+    shutil.copy2(path, candidate)
+    return candidate
+
+
+def _atomic_write(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else None
+    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(data)
+        if mode is not None:
+            os.chmod(temp_path, mode)
+        os.replace(temp_path, path)
+    finally:
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _reference_for(path: Path) -> str:
+    resolved = path.resolve()
+    try:
+        relative = resolved.relative_to(Path.home().resolve())
+    except ValueError:
+        return str(resolved)
+    return "~/" + relative.as_posix()
+
+
+def _configured_cua_server(config: dict[str, Any]) -> dict[str, Any] | None:
+    mcp = config.get("mcp")
+    if not isinstance(mcp, dict):
+        return None
+    direct = mcp.get("cua-driver")
+    if isinstance(direct, dict):
+        return direct
+    servers = mcp.get("servers")
+    legacy = servers.get("cua-driver") if isinstance(servers, dict) else None
+    return legacy if isinstance(legacy, dict) else None
+
+
+def _read_text_preserving_newlines(path: Path) -> tuple[str, bool]:
+    raw = path.read_bytes()
+    has_bom = raw.startswith(b"\xef\xbb\xbf")
+    return raw.decode("utf-8-sig"), has_bom
+
+
+def _patch_gui_instructions(path: Path) -> bytes | None:
+    if not path.exists():
+        return None
+    text, has_bom = _read_text_preserving_newlines(path)
+    lines = text.splitlines(keepends=True)
+    old_delivery = [i for i, line in enumerate(lines) if line.rstrip("\r\n").startswith(OLD_DELIVERY_PREFIX)]
+    old_stop = [i for i, line in enumerate(lines) if line.rstrip("\r\n").startswith(OLD_STOP_PREFIX)]
+    new_delivery = [i for i, line in enumerate(lines) if line.rstrip("\r\n") == NEW_DELIVERY_LINE]
+    new_stop = [i for i, line in enumerate(lines) if line.rstrip("\r\n") == NEW_STOP_LINE]
+
+    if len(new_delivery) == 1 and len(new_stop) == 1 and not old_delivery and not old_stop:
+        return None
+    if len(old_delivery) != 1 or len(old_stop) != 1 or new_delivery or new_stop:
+        raise ValueError(
+            f"Could not safely identify the old CUA policy in {path}; no files were changed. "
+            "Review that instruction file manually before installation."
+        )
+
+    for index, replacement in ((old_delivery[0], NEW_DELIVERY_LINE), (old_stop[0], NEW_STOP_LINE)):
+        ending = "\r\n" if lines[index].endswith("\r\n") else "\n" if lines[index].endswith("\n") else ""
+        lines[index] = replacement + ending
+    body = "".join(lines).encode("utf-8")
+    return (b"\xef\xbb\xbf" if has_bom else b"") + body
+
+
+def _find_runtime_path(
+    explicit: Path | None,
+    env_name: str,
+    executable_name: str,
+    config: dict[str, Any],
+    *,
+    node: bool,
+) -> Path:
+    candidates: list[Path] = []
+    if explicit is not None:
+        candidates.append(explicit.expanduser())
+    configured = os.environ.get(env_name)
+    if configured:
+        candidates.append(Path(configured).expanduser())
+    if node:
+        server = _configured_cua_server(config)
+        command = server.get("command") if isinstance(server, dict) else None
+        if isinstance(command, list) and command and isinstance(command[0], str):
+            candidates.append(Path(command[0]).expanduser())
+    else:
+        server = _configured_cua_server(config)
+        environment = server.get("environment") if isinstance(server, dict) else None
+        configured_driver = environment.get("CUA_DRIVER_EXE") if isinstance(environment, dict) else None
+        if isinstance(configured_driver, str) and configured_driver:
+            candidates.append(Path(configured_driver).expanduser())
+        if os.name == "nt" and os.environ.get("LOCALAPPDATA"):
+            candidates.append(Path(os.environ["LOCALAPPDATA"]) / "Programs" / "Cua" / "cua-driver" / "bin" / "cua-driver.exe")
+
+    found_on_path = shutil.which(executable_name)
+    if found_on_path:
+        candidates.append(Path(found_on_path))
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.resolve()
+    raise ValueError(
+        f"Could not find {executable_name}. Install it separately or pass --{('node' if node else 'driver')} PATH; "
+        "the installer does not install runtimes. No files were changed."
+    )
+
+
+def apply_configuration(
+    config_path: Path = DEFAULT_CONFIG,
+    cua_dir: Path = DEFAULT_CUA_DIR,
+    instructions_path: Path = DEFAULT_INSTRUCTIONS,
+    node_path: Path | None = None,
+    driver_path: Path | None = None,
+    source_root: Path = ROOT,
+) -> dict[str, Any]:
+    config_path = config_path.expanduser()
+    cua_dir = cua_dir.expanduser()
+    instructions_path = instructions_path.expanduser()
+    source_root = source_root.resolve()
+
+    if config_path.exists():
+        try:
+            config = json.loads(config_path.read_text(encoding="utf-8-sig"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            raise ValueError(f"OpenCode config is unreadable JSON; no files were changed: {error}") from error
+        if not isinstance(config, dict):
+            raise ValueError("OpenCode config root must be a JSON object; no files were changed.")
+    else:
+        config = {}
+
+    resolved_node = _find_runtime_path(node_path, "CUA_NODE_EXE", "node", config, node=True)
+    resolved_driver = _find_runtime_path(driver_path, "CUA_DRIVER_EXE", "cua-driver", config, node=False)
+
+    try:
+        updated = json.loads(json.dumps(config))
+        mcp = _object(updated, "mcp", "mcp")
+        legacy_servers = mcp.get("servers")
+        legacy_server = legacy_servers.get("cua-driver") if isinstance(legacy_servers, dict) else None
+        direct_server = mcp.get("cua-driver")
+        if legacy_server is not None and not isinstance(legacy_server, dict):
+            raise ValueError("Legacy mcp.servers.cua-driver must be an object; no files were changed.")
+        if direct_server is not None and not isinstance(direct_server, dict):
+            raise ValueError("mcp.cua-driver must be an object; no files were changed.")
+        if isinstance(legacy_server, dict):
+            if isinstance(direct_server, dict) and direct_server != legacy_server:
+                raise ValueError(
+                    "Conflicting mcp.cua-driver and legacy mcp.servers.cua-driver entries; "
+                    "review the config manually. No files were changed."
+                )
+            if direct_server is None:
+                mcp["cua-driver"] = legacy_server
+            del legacy_servers["cua-driver"]
+            if not legacy_servers:
+                del mcp["servers"]
+        server = _object(mcp, "cua-driver", "mcp.cua-driver")
+        environment = _object(server, "environment", "mcp.cua-driver.environment")
+        instructions = updated.get("instructions", [])
+        if isinstance(instructions, str):
+            instructions = [instructions]
+        if not isinstance(instructions, list) or any(not isinstance(item, str) for item in instructions):
+            raise ValueError("OpenCode instructions must be a string or an array of strings; no files were changed.")
+    except ValueError:
+        raise
+
+    installed_doc = cua_dir.parent / "opencode" / INSTRUCTIONS_NAME
+    # Keep policy and wrapper beside the existing CUA driver's per-user config.
+    policy_target = cua_dir / "opencode-window-scoped.rego"
+    wrapper_target = cua_dir / "opencode-mcp.mjs"
+    module_target = cua_dir / "opencode-policy.mjs"
+
+    doc_source = source_root / "docs" / INSTRUCTIONS_NAME
+    if not doc_source.is_file():
+        raise ValueError(f"CUA instruction template missing: {doc_source}; no files were changed.")
+    doc_content = doc_source.read_bytes()
+    template_contents = {
+        wrapper_target: (source_root / "tools" / "cua-driver" / "opencode-mcp.mjs").read_bytes(),
+        module_target: (source_root / "tools" / "cua-driver" / "opencode-policy.mjs").read_bytes(),
+        policy_target: (source_root / "tools" / "cua-driver" / "opencode-window-scoped.rego").read_bytes(),
+        installed_doc: doc_content,
+    }
+    instructions_file_ref = _reference_for(installed_doc)
+    if instructions_file_ref not in instructions:
+        instructions.append(instructions_file_ref)
+
+    server["type"] = "local"
+    server["command"] = [str(resolved_node), str(wrapper_target)]
+    server["enabled"] = True
+    server.pop("disabled", None)
+    environment["CUA_DRIVER_EXE"] = str(resolved_driver)
+    environment["CUA_DRIVER_POLICY_FILE"] = str(policy_target)
+    environment["CUA_DRIVER_PERMISSION_MODE"] = "standard"
+    updated["instructions"] = instructions
+
+    korean_bytes = _patch_gui_instructions(instructions_path)
+    if korean_bytes is not None:
+        template_contents[instructions_path] = korean_bytes
+    elif instructions_path.exists() and not any(
+        line.rstrip("\r\n") == NEW_DELIVERY_LINE
+        for line in _read_text_preserving_newlines(instructions_path)[0].splitlines(keepends=True)
+    ):
+        # A missing legacy block is safe only when the canonical supplement is already
+        # the sole source of the GUI policy; _patch_gui_instructions rejects unknown
+        # existing blocks to avoid leaving contradictory instructions behind.
+        text, _ = _read_text_preserving_newlines(instructions_path)
+        if "## OpenCode GUI 자동 사용" in text:
+            raise ValueError(f"Could not safely update the existing GUI policy in {instructions_path}; no files were changed.")
+
+    config_changed = updated != config
+    if config_changed:
+        template_contents[config_path] = (json.dumps(updated, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+
+    changed_targets = [target for target, content in template_contents.items() if not target.exists() or target.read_bytes() != content]
+    backups: list[str] = []
+    for target in changed_targets:
+        if target.exists():
+            backups.append(str(_backup(target)))
+    for target in changed_targets:
+        _atomic_write(target, template_contents[target])
+
+    return {
+        "config_path": str(config_path.resolve()),
+        "cua_policy_path": str(policy_target.resolve()),
+        "instructions_path": str(installed_doc.resolve()),
+        "config_changed": config_changed,
+        "changed_files": [str(path.resolve()) for path in changed_targets],
+        "backups": backups,
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG, help="OpenCode config path")
+    parser.add_argument("--cua-config-dir", type=Path, default=DEFAULT_CUA_DIR, help="CUA Driver config directory")
+    parser.add_argument("--instructions-file", type=Path, default=DEFAULT_INSTRUCTIONS, help="existing Korean global instructions to patch safely")
+    parser.add_argument("--node", type=Path, help="Node.js executable (defaults to existing config or PATH)")
+    parser.add_argument("--driver", type=Path, help="CUA Driver executable (defaults to existing config or PATH)")
+    args = parser.parse_args()
+    try:
+        result = apply_configuration(
+            args.config,
+            args.cua_config_dir,
+            args.instructions_file,
+            args.node,
+            args.driver,
+        )
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
+    print(f"OpenCode config: {result['config_path']}")
+    print(f"CUA policy: {result['cua_policy_path']}")
+    print(f"CUA instructions: {result['instructions_path']}")
+    print(f"Config changed: {result['config_changed']}")
+    print("Changed files:")
+    for path in result["changed_files"]:
+        print(f"  {path}")
+    if result["backups"]:
+        print("Backups:")
+        for path in result["backups"]:
+            print(f"  {path}")
+    print("Restart the Rider OpenCode session at a safe point to reload the MCP proxy and policy.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
