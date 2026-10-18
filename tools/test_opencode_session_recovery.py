@@ -112,6 +112,10 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("첫 도구 호출 전에 사용자의 의도를 분류", source)
         self.assertIn("설명만 원하나요, 실제 확인·수정까지 진행할까요?", source)
         self.assertIn("새 메시지가 질문이면 기존 작업을 자동 재개", source)
+        self.assertIn("같은 기능의 두 번째 구현", source)
+        self.assertIn("한 모듈·한 공개 진입점", source)
+        self.assertIn("순환 의존성이 생기지 않는지", source)
+        self.assertIn("자동 구조 검사가 없으면 실행하지 않았다고 기록", source)
 
     def test_malformed_config_is_preserved_and_refused(self):
         with tempfile.TemporaryDirectory() as temp:
