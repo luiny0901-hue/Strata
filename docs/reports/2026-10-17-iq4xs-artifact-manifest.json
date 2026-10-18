@@ -1,0 +1,160 @@
+{
+  "schema_version": 1,
+  "model": {
+    "repository": "unsloth/Qwen3.8-Flash-Next-GGUF",
+    "revision": "2c41bd2a0b3f51c503c11f1c7ed2e6bb34036beb",
+    "variant": "UD-IQ4_XS",
+    "size_bytes": 93682584224
+  },
+  "nvfp4_fork": {
+    "repository": "sergqwer/strata-nvfp4",
+    "version": "0.1.44.1-nvfp4.2"
+  },
+  "verification_note": "Model SHA-256 values were read from successful Hugging Face .done markers and match the official file metadata at the pinned revision. This generation did not re-read the full model files; verify-assets performs a full local re-hash.",
+  "files": [
+    {
+      "root": "model",
+      "path": "Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf",
+      "size": 10946624,
+      "sha256": "5ce89370720f8bf90890f439361282104c1aa1482d4013bb9a50923e758e71a4"
+    },
+    {
+      "root": "model",
+      "path": "Qwen3.8-Flash-Next-UD-IQ4_XS-00002-of-00003.gguf",
+      "size": 49835229856,
+      "sha256": "577a38a2392b40ca2193cea502e1d92f60b8cd370675d308e0ec21885d9daaa7"
+    },
+    {
+      "root": "model",
+      "path": "Qwen3.8-Flash-Next-UD-IQ4_XS-00003-of-00003.gguf",
+      "size": 43836407744,
+      "sha256": "d4634e6d84f0ebb0940be15c90d3790bf6464e3dea3a1cddc567dc0e83ad8833"
+    },
+    {
+      "root": "pack",
+      "path": "compat-bf16.json",
+      "size": 22067,
+      "sha256": "e1e9b60d296a460ee43139acaa6e28403e74dbce1e44131aa1a98b8622ef467e"
+    },
+    {
+      "root": "pack",
+      "path": "conversions.json",
+      "size": 171933,
+      "sha256": "f050a448cbe24ea3af9ccac0f0ea62f84f7ce90d2c2da2042acf4877e326a77f"
+    },
+    {
+      "root": "pack",
+      "path": "dense.bin",
+      "size": 1485688320,
+      "sha256": "f53174059b262ed342b82e143af62056081948ef5e5f1903a1a70eeb73fa4a23"
+    },
+    {
+      "root": "pack",
+      "path": "index.txt",
+      "size": 93559,
+      "sha256": "e61c835287c36ececdd3c0794c1d23bcc8e0714eadc6c4aec56c152abcb2364d"
+    },
+    {
+      "root": "pack",
+      "path": "native_experts.txt",
+      "size": 5803,
+      "sha256": "f9a8bdec38ab634fec9a31807cc3284e6497ef24c1afa0d8853127b0537c68db"
+    },
+    {
+      "root": "pack",
+      "path": "tokenizer/chat_template.jinja",
+      "size": 9993,
+      "sha256": "12827f24b742ea4e80cdc12dbcf9622227056b9f797252a3149263d4f9aaadce"
+    },
+    {
+      "root": "pack",
+      "path": "tokenizer/merges.txt",
+      "size": 3600844,
+      "sha256": "080cf95432173729d160346b7882bd2a644b07f7a3813a3eb73f4e66787bfde9"
+    },
+    {
+      "root": "pack",
+      "path": "tokenizer/token_type.json",
+      "size": 744960,
+      "sha256": "5088c8c298fc06af8382ddb3b76c888703ac2634e82263b97eedcc2ad202738b"
+    },
+    {
+      "root": "pack",
+      "path": "tokenizer/tokenizer.json",
+      "size": 554,
+      "sha256": "87be2ac47d8bc7393b7435df6ccd276740019a393941a2585d5edce59f450c54"
+    },
+    {
+      "root": "pack",
+      "path": "tokenizer/vocab.json",
+      "size": 5737005,
+      "sha256": "4ba64f0332abcfb0b600b7df1537d1e836e68009d5fb7cdb77339738dc6365c4"
+    },
+    {
+      "root": "data",
+      "path": "models/mmproj-Qwen3.8-Flash-Next-BF16.gguf",
+      "size": 907543008,
+      "sha256": "b1a82259702816a5330d7bd7607cd9676b11780e79ff7348c21103ff3ce49bd0"
+    },
+    {
+      "root": "data",
+      "path": "mtp/rt/dense.bin",
+      "size": 116099072,
+      "sha256": "c724dc0b0822ada5d2977bf5bde821605feabaa64ea2e0045b67ca656329070a"
+    },
+    {
+      "root": "data",
+      "path": "mtp/rt/dense.txt",
+      "size": 1880,
+      "sha256": "8773c81ebb0986e37fe94a8a9933e87be48b1fabc6889a0106bcdab179d1c2ac"
+    },
+    {
+      "root": "data",
+      "path": "mtp/rt/draft_vocab.bin",
+      "size": 425196,
+      "sha256": "b1e1d3a7a9e4bf862dcd5923ce661fb59bbd07907e594df5cf86a62ac235cb91"
+    },
+    {
+      "root": "data",
+      "path": "mtp/rt/experts.bin",
+      "size": 707788800,
+      "sha256": "09398406be61f1f54c93861f449e48b8df0bfccbc9ec9b2b7636775a6ea9244f"
+    },
+    {
+      "root": "fork",
+      "path": "engine/strata.exe",
+      "size": 211568128,
+      "sha256": "3dc869fb8bd9ef8456622cc14be0b0f02c353960707ecdf09d9e972e234265e5"
+    },
+    {
+      "root": "fork",
+      "path": "engine/strata-vision.exe",
+      "size": 4933632,
+      "sha256": "518561759983c99e73e5993c100b2bbffc30f99eae2126090768dd3374d35980"
+    },
+    {
+      "root": "fork",
+      "path": "data/uncensor/qwen-nvfp4-gptq-uncensored.gguf",
+      "size": 267552,
+      "sha256": "a2ec3e999724022a55d48d30822bd10b1b25916ccc221013a119a674d06a46b5"
+    },
+    {
+      "root": "fork",
+      "path": "data/uncensor/qwen-nvfp4-gptq-uncensored.json",
+      "size": 5078,
+      "sha256": "e3c0921fea856121a1ec857ae7248455e4d090c7e7ce97cb6b91b960f0f60fd4"
+    },
+    {
+      "root": "fork",
+      "path": "release-manifest.json",
+      "size": 31442,
+      "sha256": "2cc1d85a3e875c42d92ef099b7f3bd679ca4421fb089b7cc1d723d6d5cdd1028"
+    },
+    {
+      "root": "strata",
+      "path": "data/expert-profile.bin",
+      "size": 196632,
+      "sha256": "8f59b4aa8873209dff11c11e37bcda9529a1335b724a1afeea37bf6388975baf"
+    }
+  ]
+}
