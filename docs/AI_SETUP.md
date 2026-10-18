@@ -174,6 +174,12 @@ line when it is ready; the engine log is `strata-<model>.log` in the Strata fold
 - **Claude Code:** `ANTHROPIC_BASE_URL=http://127.0.0.1:8080`, `ANTHROPIC_MODEL` set to a Claude model name it knows
   (Strata ignores the name), and any `ANTHROPIC_AUTH_TOKEN` (or the configured key).
 - **Thinking level:** `"reasoning_effort": "none" | "low" | "medium" | "high"` (default high).
+- To connect OpenCode and Rider on a Windows or Apple Silicon Mac client, use the [remote client setup guide](REMOTE_AGENT_CLIENTS_KO.md).
+  The guided setup creates a separate OpenCode V2 overlay, preserves the existing global config, tests the server's
+  `/health` and authenticated `/v1/models`, and adds a Rider ACP entry. For large coding projects it also applies the
+  [portable agent profile](../examples/opencode/autonomous-agent-v2.fragment.json). If selected during guided setup,
+  the official Cua Driver is installed for the local client and registered as an OpenCode MCP server. macOS
+  Accessibility and Screen Recording approvals remain user-controlled; actual GUI interaction is not validated by setup.
 - Strata answers one request at a time; `"parallel": N` in the model's config (or setup `--parallel N`) decodes up to
   N together ([BATCHING.md](BATCHING.md)). API details: [DETAILS.md](DETAILS.md#using-it).
 
