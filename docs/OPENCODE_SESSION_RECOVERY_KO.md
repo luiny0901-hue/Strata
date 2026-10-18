@@ -57,3 +57,13 @@ Strata 로그의 done (stop, cancel=False)는 모델 생성 또는 도구 호출
 도구는 JSON을 다시 읽어 파싱하고, config에 변경 전 백업을 남깁니다. OpenCode가 실행 중인 세션은 이미 읽은 설정을 계속 사용할 수 있습니다. 진행 중인 작업을 끊지 말고 안전한 지점에서 OpenCode를 재시작한 다음 새 세션 또는 재개 세션에서 확인합니다.
 
 잘못된 config 형식이면 설치기는 수정을 거부하고 파일을 보존합니다. 복구가 필요하면 출력된 백업 파일을 이용해 이전 config를 복원할 수 있습니다. 자동으로 Strata 서버를 재시작하거나 GPU 작업을 실행하지 않습니다.
+
+## 262K 압축·수정 흐름 검증
+
+다음 검증기는 OpenCode CLI의 실제 세션과 도구 호출을 임시 프로젝트에서 실행합니다. 262,144 토큰 모델 선언과 `auto=true`, 최근 대화 12,000 토큰 보존, 65,536 토큰 여유를 사용합니다. Provider가 196,608 토큰을 사용했다고 보고한 뒤 OpenCode가 다음 수정 요청 전에 `<conversation-checkpoint>`를 포함해 대화를 요약하는지, 파일 생성 뒤 같은 세션의 수정 요청이 끝까지 이어지는지를 검사합니다.
+
+~~~powershell
+& "$env:USERPROFILE\Strata\.venv\Scripts\python.exe" tools\verify_opencode_262k_workflow.py
+~~~
+
+검증기는 loopback의 OpenAI 호환 fixture만 시작하며 운영 Strata 서버, 모델, GPU, Rider와 전역 OpenCode 설정을 바꾸지 않습니다. 따라서 OpenCode의 262K 정책·요약·도구 세션 경로 증거이지, 실제 Strata 모델의 장시간 품질·성능·GPU 안정성 증거는 아닙니다. 실제 모델 검증은 운영 서버를 사용하지 않는 별도 승인된 작업으로 기록합니다.
