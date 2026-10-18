@@ -27,6 +27,8 @@ py -3 tools/configure_opencode_cua_automation.py
 
 설치기는 기존 provider·키·모델·개인 지침을 보존하고 변경 파일 옆에 백업합니다. Node.js와 CUA Driver가 설치되어 있어야 합니다. 잘못된 명시 경로나 알 수 없는 기존 GUI 정책은 덮어쓰지 않습니다.
 
+UAC 확인 창은 운영체제 보안 데스크톱이므로 에이전트가 누르지 않습니다. 관리자 권한이 필요한 작업은 `BLOCKED_UAC`로 끝나며, 사용자 본인이 승인하거나 제시된 단일 관리자 명령을 실행한 뒤 결과를 새 요청으로 전달합니다. 승인 대기·반복 시도·권한 우회는 하지 않습니다. 수락 조건이 모두 검증된 작업은 최종 답변으로 끝나며 이후 도구 호출을 계속하지 않도록 지침과 정책을 함께 적용합니다.
+
 ## 새 Windows / Apple Silicon Mac 클라이언트
 
 1. Python 3.10+, Node.js, OpenCode V2를 해당 PC에 설치합니다. Windows의 제한 시간 셸 도우미는 PowerShell 7, Mac의 Bash 도우미는 GNU `gtimeout`이 필요합니다. 기본 macOS에는 `gtimeout`이 없을 수 있습니다.

@@ -11,10 +11,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from tools.configure_opencode_session_recovery import apply_config  # noqa: E402
+from tools.configure_opencode_session_recovery import DEFAULT_SOURCE, UAC_DENY_POLICIES, apply_config  # noqa: E402
 
 
-SOURCE = ROOT / "docs" / "OPENCODE_SESSION_RECOVERY_KO.md"
+SOURCE = DEFAULT_SOURCE
 
 
 class InstallerTests(unittest.TestCase):
@@ -51,6 +51,7 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(config["compaction"]["keep"]["tokens"], 12000)
             self.assertEqual(config["compaction"]["buffer"], 65536)
             self.assertEqual(config["agents"]["build"]["steps"], 60)
+            self.assertEqual(config["policies"], list(UAC_DENY_POLICIES))
             self.assertEqual(config["model"], "strata/qwen3.8-flash-next-unsloth-ud-iq4_xs")
             self.assertEqual(config["providers"]["strata"]["apiKey"], "test-secret-preserved")
             self.assertEqual(
@@ -80,6 +81,34 @@ class InstallerTests(unittest.TestCase):
             config = json.loads(first_bytes)
             self.assertEqual(len(config["instructions"]), 1)
             self.assertTrue(config["instructions"][0].endswith("/STRATA_SESSION_RECOVERY_KO.md"))
+            self.assertEqual(config["policies"], list(UAC_DENY_POLICIES))
+
+    def test_existing_policies_are_preserved_and_uac_denies_are_last(self):
+        with tempfile.TemporaryDirectory() as temp:
+            config_path = Path(temp) / "opencode.json"
+            custom = {"action": "tool.use", "resource": "shell:git status *", "effect": "allow"}
+            config_path.write_text(json.dumps({"policies": [custom]}), encoding="utf-8")
+
+            apply_config(config_path, SOURCE)
+
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            self.assertEqual(config["policies"], [custom, *UAC_DENY_POLICIES])
+
+    def test_malformed_policies_are_preserved_and_refused(self):
+        with tempfile.TemporaryDirectory() as temp:
+            config_path = Path(temp) / "opencode.json"
+            original = json.dumps({"policies": {"not": "a list"}}).encode("utf-8")
+            config_path.write_bytes(original)
+
+            with self.assertRaisesRegex(ValueError, "policies must be an array"):
+                apply_config(config_path, SOURCE)
+
+            self.assertEqual(config_path.read_bytes(), original)
+
+    def test_installed_recovery_instructions_define_uac_and_completion_boundaries(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        self.assertIn("BLOCKED_UAC", source)
+        self.assertIn("완료는 종료 상태", source)
 
     def test_malformed_config_is_preserved_and_refused(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -18,6 +18,17 @@ DEFAULT_CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")
 DEFAULT_SOURCE = Path(__file__).resolve().parents[1] / "examples" / "opencode" / "STRATA_SESSION_RECOVERY_KO.md"
 INSTALLED_INSTRUCTIONS_NAME = "STRATA_SESSION_RECOVERY_KO.md"
 
+# Elevation opens an OS-owned secure desktop or a credential prompt. An agent
+# cannot safely observe or complete it, so a pending elevation must never turn
+# into an unattended wait/retry loop.
+UAC_DENY_POLICIES = (
+    {"action": "tool.use", "resource": "shell:*Start-Process*Verb*RunAs*", "effect": "deny"},
+    {"action": "tool.use", "resource": "shell:* -Verb RunAs*", "effect": "deny"},
+    {"action": "tool.use", "resource": "shell:runas *", "effect": "deny"},
+    {"action": "tool.use", "resource": "shell:sudo *", "effect": "deny"},
+    {"action": "tool.use", "resource": "shell:gsudo *", "effect": "deny"},
+)
+
 
 def _mapping(parent: dict[str, Any], key: str, label: str) -> dict[str, Any]:
     value = parent.get(key)
@@ -26,6 +37,16 @@ def _mapping(parent: dict[str, Any], key: str, label: str) -> dict[str, Any]:
         parent[key] = value
     if not isinstance(value, dict):
         raise ValueError(f"{label} must be a JSON object; no files were changed.")
+    return value
+
+
+def _rules(parent: dict[str, Any], key: str, label: str) -> list[dict[str, Any]]:
+    value = parent.get(key)
+    if value is None:
+        value = []
+        parent[key] = value
+    if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
+        raise ValueError(f"{label} must be an array of JSON objects; no files were changed.")
     return value
 
 
@@ -75,6 +96,10 @@ def configure_policy(updated: dict[str, Any], context: int = 262144) -> None:
     keep["tokens"] = min(12000, context // 8)
     compaction["buffer"] = min(65536, context // 4)
     build["steps"] = 60
+    policies = _rules(updated, "policies", "policies")
+    for policy in UAC_DENY_POLICIES:
+        if policy not in policies:
+            policies.append(copy.deepcopy(policy))
 
 
 def apply_config(

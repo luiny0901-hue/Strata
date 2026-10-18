@@ -12,6 +12,33 @@
     },
     "buffer": 65536
   },
+  "policies": [
+    {
+      "action": "tool.use",
+      "resource": "shell:*Start-Process*Verb*RunAs*",
+      "effect": "deny"
+    },
+    {
+      "action": "tool.use",
+      "resource": "shell:* -Verb RunAs*",
+      "effect": "deny"
+    },
+    {
+      "action": "tool.use",
+      "resource": "shell:runas *",
+      "effect": "deny"
+    },
+    {
+      "action": "tool.use",
+      "resource": "shell:sudo *",
+      "effect": "deny"
+    },
+    {
+      "action": "tool.use",
+      "resource": "shell:gsudo *",
+      "effect": "deny"
+    }
+  ],
   "instructions": [
     "~/.config/opencode/KOREAN_INSTRUCTIONS.md"
   ],
