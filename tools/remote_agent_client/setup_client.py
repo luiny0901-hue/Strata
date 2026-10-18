@@ -31,6 +31,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 from tools.configure_opencode_cua_automation import locate_cua_driver, prepare_configuration
 from tools.configure_opencode_session_recovery import configure_policy, DEFAULT_SOURCE as RECOVERY_SOURCE
+from tools.remote_agent_client.rea_integration import ReaSetupError, configure_opencode as configure_rea_opencode, doctor_opencode as doctor_rea_opencode
 
 EXAMPLE_DIR = REPO_ROOT / "examples" / "opencode"
 PROFILE_FILE = EXAMPLE_DIR / "autonomous-agent-v2.fragment.json"
@@ -404,6 +405,21 @@ def ensure_cua_driver(home: Path) -> tuple[Path | None, str]:
     return driver, "installed"
 
 
+def ensure_rea() -> str:
+    """Configure the optional REA MCP through REA's own setup transaction."""
+    print("REA는 로컬 파일·앱을 근거와 함께 분석하는 별도 MCP 도구입니다.")
+    print("공식 REA setup은 OpenCode MCP 등록과 REA 분석 지침만 추가하고 기존 설정은 백업합니다.")
+    print("Ghidra·IDA·Hopper 같은 선택 분석 엔진은 설치하거나 변경하지 않습니다.")
+    if input("지금 REA를 OpenCode에 등록할까요? [Y/n]: ").strip().lower() in ("n", "no"):
+        return "declined"
+    try:
+        configure_rea_opencode()
+    except ReaSetupError as exc:
+        print(f"REA 등록 실패: {exc}")
+        return "setup-failed"
+    return "configured"
+
+
 def start_new_macos_cua_install(driver: Path) -> bool:
     """Start the permission-owning app after a fresh install; user grants remain manual."""
     open_command = shutil.which("open")
@@ -562,6 +578,7 @@ def write_setup(
     version: str,
     cua_driver: Path | None,
     cua_status: str,
+    rea_status: str,
 ) -> str:
     acp = acp_path(home)
     # Validate existing ACP before writing any local client configuration.
@@ -625,7 +642,10 @@ def write_setup(
         "cua_driver_executable": str(cua_driver) if cua_driver else None,
         "cua_driver_setup_status": cua_status,
         "cua_mcp": config.get("mcp", {}).get("servers", {}).get(CUA_SERVER_ID),
-        "setup_revision": 2,
+        "rea_setup_status": rea_status,
+        "rea_client": "opencode",
+        "rea_package": "rea-agents@6.7.0",
+        "setup_revision": 3,
         "asset_sha256": {str(path): hashlib.sha256(data).hexdigest() for path, data in files.items()},
     }
     atomic_write(state_path(home), (json.dumps(state, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
@@ -671,12 +691,20 @@ def do_setup(args: argparse.Namespace) -> int:
         health, models = fetch_server_profile(base_url, key)
     model = choose_model(models)
     cua_driver, cua_status = ensure_cua_driver(home)
-    agent = write_setup(home, base_url, key, health, model, opencode, version, cua_driver, cua_status)
+    rea_status = ensure_rea()
+    agent = write_setup(home, base_url, key, health, model, opencode, version, cua_driver, cua_status, rea_status)
     if cua_driver is not None and sys.platform == "darwin" and cua_status == "installed":
         if start_new_macos_cua_install(cua_driver):
             print("CUA Driver 앱을 시작했습니다. macOS 시스템 설정에서 화면 기록과 손쉬운 사용 권한을 승인하세요.")
         else:
             print("CUA Driver는 설치됐지만 macOS 앱/권한 요청을 시작하지 못했습니다.")
+
+    if rea_status == "configured":
+        print("  REA: OpenCode MCP 및 분석 지침을 등록했습니다. OpenCode/Rider를 완전히 다시 시작하세요.")
+    elif rea_status == "declined":
+        print("  REA: 설치를 건너뛰었습니다. setup을 다시 실행하면 등록할 수 있습니다.")
+    else:
+        print("  REA: 등록에 실패했습니다. Strata 연결은 구성됐지만 REA는 사용할 수 없습니다. setup을 다시 실행하세요.")
 
     loaded = "loaded" if health.get("loaded") is True else "모델 미로드 (서버는 응답함)"
     context = health.get("max_context") or "서버가 보고하지 않음"
@@ -893,6 +921,21 @@ def do_doctor(args: argparse.Namespace) -> int:
                 print("UNVERIFIED macOS CuaDriver.app 데몬 및 손쉬운 사용/화면 기록 권한; System Settings에서 확인하세요.")
             else:
                 print("UNVERIFIED 실제 화면 인식·마우스·키보드 동작; 이 진단은 GUI 상호작용을 수행하지 않습니다.")
+    rea_status = state.get("rea_setup_status")
+    if rea_status == "configured":
+        try:
+            doctor_rea_opencode()
+            print("PASS REA OpenCode MCP 및 분석 지침 등록")
+        except ReaSetupError as exc:
+            print(f"FAIL REA OpenCode 등록: {exc}")
+            failures += 1
+    elif rea_status == "declined":
+        print("NOT_CONFIGURED REA: setup에서 등록을 건너뛰었습니다.")
+    elif rea_status:
+        print("FAIL REA: 이전 setup에서 등록하지 못했습니다. setup을 다시 실행하세요.")
+        failures += 1
+    else:
+        print("NOT_CONFIGURED REA: 이 영수증은 REA 통합 이전 버전입니다. setup을 다시 실행하세요.")
     print("NOT_RUN Hermes ACP: Hermes는 OpenCode와 별도 설정입니다.")
     return 1 if failures else 0
 

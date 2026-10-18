@@ -10,14 +10,14 @@ Strata 서버가 신뢰 가능한 LAN 또는 Tailscale에서 실행 중이고 AP
 
 ```powershell
 # Windows PowerShell (setup 실행 정책 변경 없이 실행)
-git clone --depth 1 --branch feature/opencode-agent-workflow https://github.com/luiny0901-hue/Strata.git Strata-client-setup
+git clone --depth 1 --branch feature/opencode-session-recovery https://github.com/luiny0901-hue/Strata.git Strata-client-setup
 cd Strata-client-setup
 .\tools\remote_agent_client\setup-windows.bat setup
 ```
 
 ```sh
 # Apple Silicon Mac 터미널
-git clone --depth 1 --branch feature/opencode-agent-workflow https://github.com/luiny0901-hue/Strata.git Strata-client-setup
+git clone --depth 1 --branch feature/opencode-session-recovery https://github.com/luiny0901-hue/Strata.git Strata-client-setup
 cd Strata-client-setup
 sh tools/remote_agent_client/setup-macos.sh setup
 ```
@@ -25,6 +25,8 @@ sh tools/remote_agent_client/setup-macos.sh setup
 설정 도구가 서버 URL과 API 키를 묻고, `/health`와 인증된 `/v1/models`에서 실제 모델 ID와 context/image 상태를 읽어 OpenCode V2 설정을 만듭니다. API 키는 입력할 때 화면에 표시하지 않고 이 클라이언트 전용 사용자 설정 폴더에 저장합니다. OpenCode의 기존 전역 설정은 덮어쓰지 않고, `OPENCODE_CONFIG` 오버레이를 통해 기존 설정에 원격 Strata provider를 추가합니다. OpenCode 설정은 여러 위치의 값을 병합하므로 겹치지 않는 전역·프로젝트 설정은 그대로 적용됩니다. [OpenCode V2 설정 병합·오버레이 안내](https://dev.opencode.ai/v2/docs/config/)
 
 도구는 OpenCode 실행용 wrapper와 Rider ACP 항목을 추가하고, 기존 `~/.jetbrains/acp.json`에 다른 agent가 있으면 보존합니다. 설정 후 Rider를 재시작하고 AI Chat에서 **OpenCode Strata** agent를 고르세요. 터미널에서는 Windows PowerShell의 생성된 `opencode-strata.ps1` 또는 Mac의 `opencode-strata` wrapper를 실행합니다. 상태 재점검은 같은 스크립트에 `doctor`를 전달합니다.
+
+통합 setup은 REA(Reverse Engineer Anything)도 기본 선택으로 등록합니다. REA는 OpenCode의 로컬 MCP로 실행되며, 설치 과정은 고정된 `rea-agents@6.7.0` 패키지의 공식 setup을 호출해 기존 OpenCode 설정을 백업하고 REA MCP·분석 지침을 추가합니다. 일반 Build 세션에는 REA 도구를 숨기고 `rea_analysis` 분석 subagent에서만 활성화합니다. REA의 Ghidra·IDA·Hopper 같은 네이티브 분석 엔진은 설치하지 않습니다. OpenCode/Rider를 완전히 재시작한 뒤 REA 도구가 보이는지 확인하세요.
 
 이 문서의 clone URL은 이 설정 작업이 들어간 사용자 저장소 branch입니다. 변경이 공식 저장소에 반영되면 공식 `main` 안내로 갱신할 수 있습니다. 이 도구는 OpenCode나 Rider를 설치하지 않고, Strata 서버·방화벽·Tailscale 설정도 변경하지 않습니다. Python 3와 OpenCode V2 CLI가 클라이언트 PC에 있어야 합니다. 자세한 생성 파일, 백업, 복구 방법은 [클라이언트 설정 도구 안내](../tools/remote_agent_client/README_KO.md)를 참고하세요.
 

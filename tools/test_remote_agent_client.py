@@ -29,7 +29,7 @@ class RemoteClientTests(unittest.TestCase):
              patch.object(client, "secure_windows_directory"):
             return client.write_setup(self.home, "http://100.64.0.10:8080/v1", "fixture-secret",
                                       self.health, self.model, self.opencode, "2.0.22",
-                                      self.driver if driver else None, "existing")
+                                      self.driver if driver else None, "existing", "configured")
 
     def test_fresh_remote_setup_shares_recovery_and_window_policy(self):
         name = self.install()
@@ -39,6 +39,9 @@ class RemoteClientTests(unittest.TestCase):
         self.assertEqual(config["permissions"][-1], {"action": "*", "resource": "*", "effect": "allow"})
         self.assertEqual(config["providers"]["strata"]["models"]["server"]["modelID"], "actual-server-id")
         self.assertEqual(config["providers"]["strata"]["models"]["server"]["limit"]["output"], 32000)
+        state = json.loads(client.state_path(self.home).read_text(encoding="utf-8"))
+        self.assertEqual(state["rea_setup_status"], "configured")
+        self.assertEqual(state["rea_package"], "rea-agents@6.7.0")
         server = config["mcp"]["servers"]["cua-driver"]
         self.assertFalse(server["disabled"])
         self.assertFalse(server["codemode"])

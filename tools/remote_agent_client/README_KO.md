@@ -27,6 +27,8 @@ sh tools/remote_agent_client/setup-macos.sh setup
 
 도구가 서버 주소와 키를 묻습니다. 키는 숨김 입력이며, 먼저 `/health`와 인증된 `/v1/models`를 확인합니다. 모델 ID는 서버 응답에서 선택하므로 프로필 이름을 추측하지 않습니다. 여러 모델이 있으면 목록에서 선택합니다. context와 이미지 capability는 `/health`가 반환한 값만 사용합니다. 이후 CUA Driver가 없으면 공식 설치기를 내려받을지 묻습니다. 기본 응답은 설치이며, `n`을 입력하면 Strata 연결은 계속 설정하고 CUA만 건너뜁니다.
 
+CUA 단계 다음에는 REA 등록 여부를 묻습니다. 기본 응답은 등록이며, Node.js 22.19+, 24.11+ 또는 26+와 `npx`를 확인한 후 공식 `npx -y rea-agents@6.7.0 setup --yes --client opencode`를 실행합니다. REA가 MCP 등록과 분석 지침을 소유하며, 이 도구는 OpenCode의 `rea_*` 도구 범위만 관리해 일반 코딩 세션의 컨텍스트 증가를 막습니다. `n`을 입력하거나 REA 등록이 실패해도 Strata 연결은 보존되며, 상태는 영수증에 기록됩니다.
+
 설치기는 관리자 권한 없이 실행합니다. Windows에서는 사용자 PATH 변경과 자동 시작 작업을 건너뛰고, macOS에서는 셸 PATH 파일을 변경하지 않습니다. macOS 최초 설치에서는 CuaDriver.app을 시작해 권한 안내를 열 수 있습니다. 화면 기록과 손쉬운 사용 권한은 macOS System Settings에서 직접 승인해야 합니다.
 
 설정이 끝나면 Rider를 재시작하고 AI Chat의 agent 선택기에서 `OpenCode Strata`를 고릅니다. OpenCode 터미널 작업은 다음 wrapper를 사용합니다.
@@ -55,12 +57,21 @@ sh tools/remote_agent_client/setup-macos.sh doctor
 | `~/.config/opencode/strata-client/KOREAN_INSTRUCTIONS.md` | 한국어 작업 지침 사본 |
 | `~/.config/opencode/strata-client/bin/` | `OPENCODE_CONFIG`를 설정하는 OS별 CLI/ACP wrapper |
 | `~/.config/opencode/strata-client/setup-state.json` | 비밀이 아닌 서버·모델·경로 상태 |
+| `~/.config/opencode/opencode.json`의 `rea` MCP 등록 | REA 공식 setup이 백업 후 추가하는 고정 버전 `rea-agents@6.7.0` 실행 등록 |
+| `~/.agents/skills/reverse-engineer-anything` | REA 공식 setup이 설치하는 분석 지침과 참조 자료 |
 | OpenCode 오버레이의 `mcp.servers.cua-driver` | 창 단위 정책을 적용하는 Node 중계기 |
 | `~/.jetbrains/acp.json` | 기존 agent를 보존하고 추가한 OpenCode Strata ACP 항목 |
 
 기존 OpenCode 전역 `opencode.json`과 `opencode.jsonc`는 수정하지 않습니다. OpenCode의 `OPENCODE_CONFIG` 사용자 설정 오버레이는 전역·프로젝트 설정과 병합되며, 생성 overlay에는 OpenCode V2의 portable agent profile, Strata provider, 서버가 보고한 모델 ID가 들어갑니다. 프로젝트별 `opencode.json(c)`가 같은 키를 정의하면 그 설정이 우선할 수 있습니다. [V2 설정 위치와 병합](https://dev.opencode.ai/v2/docs/config/), [V2 provider](https://opencode.ai/v2/docs/providers/), [V2 파일 변수](https://dev.opencode.ai/v2/docs/config/)
 
 기존 `acp.json`이 있으면 백업을 만든 뒤 다른 agent 항목을 보존합니다. 같은 이름이 이미 사용 중이면 새 항목에 `(2)` 같은 이름을 붙입니다. 기존 ACP 파일을 JSON으로 읽을 수 없으면 덮어쓰지 않고 중단합니다.
+
+## REA
+
+- REA는 로컬 파일, .NET 어셈블리, JavaScript/Electron 앱, 웹 페이지와 사용자가 권한을 가진 바이너리를 근거 중심으로 분석하는 MCP입니다. `rea_analysis` subagent는 REA가 필요한 분석일 때 자동 선택되거나 `@rea_analysis`로 직접 호출할 수 있습니다. 분석 대상의 라이선스와 권한은 사용자가 확인해야 합니다.
+- 설치기는 REA OpenCode 등록과 분석 지침만 추가합니다. REA CLI를 전역 설치하지 않으며, MCP는 고정된 npm 패키지를 `npx`로 시작합니다. 터미널 일회성 실행은 `npx -y rea-agents@6.7.0 --help`를 사용하세요.
+- `doctor`는 REA의 OpenCode 등록과 분석 지침만 범위 지정해 확인합니다. Ghidra, IDA, Hopper, JADX, Kuna가 설치되지 않은 경고는 해당 네이티브 분석 기능이 미구성이라는 뜻이며 OpenCode MCP 등록 실패로 취급하지 않습니다.
+- 재설치 후 REA를 사용하려면 setup에서 기본 선택을 수락하고 OpenCode와 Rider를 완전히 재시작하세요. 일반 Build 세션에는 `rea_*` 도구를 노출하지 않아 REA의 큰 도구 목록이 매 요청 컨텍스트를 불필요하게 차지하지 않습니다. 기존 OpenCode 설정의 REA 백업은 REA가 `opencode.json.rea.backup`으로 관리합니다.
 
 ## CUA와 Hermes
 
