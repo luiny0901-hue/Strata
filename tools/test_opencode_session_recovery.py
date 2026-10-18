@@ -109,6 +109,9 @@ class InstallerTests(unittest.TestCase):
         source = SOURCE.read_text(encoding="utf-8")
         self.assertIn("BLOCKED_UAC", source)
         self.assertIn("완료는 종료 상태", source)
+        self.assertIn("첫 도구 호출 전에 사용자의 의도를 분류", source)
+        self.assertIn("설명만 원하나요, 실제 확인·수정까지 진행할까요?", source)
+        self.assertIn("새 메시지가 질문이면 기존 작업을 자동 재개", source)
 
     def test_malformed_config_is_preserved_and_refused(self):
         with tempfile.TemporaryDirectory() as temp:
