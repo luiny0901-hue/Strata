@@ -48,7 +48,7 @@ class CuaInstallerTests(unittest.TestCase):
         self.repo = self.root / "repo"
         (self.repo / "examples/opencode").mkdir(parents=True)
         (self.repo / "tools" / "cua-driver").mkdir(parents=True)
-        for name in ("opencode-mcp.mjs", "opencode-catalog.mjs", "opencode-policy.mjs", "opencode-window-scoped.rego"):
+        for name in ("opencode-mcp.mjs", "opencode-catalog.mjs", "opencode-grounding.mjs", "opencode-policy.mjs", "opencode-window-scoped.rego"):
             (self.repo / "tools" / "cua-driver" / name).write_text(f"template {name}\n", encoding="utf-8")
         (self.repo / "examples/opencode" / "OPENCODE_CUA_AUTOMATION_KO.md").write_text("CUA instructions\n", encoding="utf-8")
         self.config = self.root / "opencode.json"

@@ -57,7 +57,7 @@ class InstallerTests(unittest.TestCase):
             self.assertTrue(config["compaction"]["auto"])
             self.assertEqual(config["compaction"]["keep"]["tokens"], 12000)
             self.assertEqual(config["compaction"]["buffer"], 65536)
-            self.assertEqual(config["agents"]["build"]["steps"], 60)
+            self.assertEqual(config["agents"]["build"]["steps"], 100)
             self.assertEqual(config["policies"], list(UAC_DENY_POLICIES))
             self.assertEqual(config["permissions"], [FULL_ACCESS_PERMISSION])
             self.assertEqual(config["model"], "strata/qwen3.8-flash-next-unsloth-ud-iq4_xs")
@@ -149,21 +149,29 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(config_path.read_bytes(), original)
 
     def test_installed_recovery_instructions_define_uac_and_completion_boundaries(self):
-        source = SOURCE.read_text(encoding="utf-8")
-        self.assertIn("BLOCKED_UAC", source)
-        self.assertIn("WAITING_FOR_USER_CONFIRMATION", source)
-        self.assertIn("승인 완료, 계속", source)
-        self.assertIn("완료는 종료 상태", source)
-        self.assertIn("첫 도구 호출 전에 사용자의 의도를 분류", source)
-        self.assertIn("설명만 원하나요, 실제 확인·수정까지 진행할까요?", source)
-        self.assertIn("새 메시지가 질문이면 기존 작업을 자동 재개", source)
-        self.assertIn("`설계 전용`, `문서 전용`, `구현` 중 하나", source)
-        self.assertIn("설계안, TODO, 인수 기준, 예시 코드는 구현 권한이 아니다", source)
-        self.assertIn("설계 문서만 수정할까요, 코드 구현·리팩터링까지 진행할까요?", source)
-        self.assertIn("같은 기능의 두 번째 구현", source)
-        self.assertIn("한 모듈·한 공개 진입점", source)
-        self.assertIn("순환 의존성이 생기지 않는지", source)
-        self.assertIn("자동 구조 검사가 없으면 실행하지 않았다고 기록", source)
+        # Policy owners are split across registered files instead of duplicated.
+        recovery = SOURCE.read_text(encoding="utf-8")
+        basic = (SOURCE.parent / "KOREAN_INSTRUCTIONS.md").read_text(encoding="utf-8")
+        for term in (
+            "BLOCKED_UAC", "WAITING_FOR_USER_CONFIRMATION", "승인 완료, 계속",
+            "완료는 종료 상태", "같은 기능의 두 번째 구현", "같은 수정을 두 작업자에게 동시에 맡기지 않는다",
+            "이름이나 코드 유사성만으로 합치거나 삭제하지 않는다", "새 요구와 미완료 부분만 처리",
+            "채팅 기록이 없는 새 세션", "인계 문서는 참고 근거이고 현재 실행 허가가 아니다",
+            "과거 채팅을 요구하지 않는다", "매 단계마다 모든 서버의 목록과 사용법을 다시 조회하지 않는다",
+            "전송 성공은 동작 성공이 아니다", "실제 상태 확인 없이 재전송하지 않는다",
+            "관련 소스·설정·의존성·환경이 같을 때만 재사용",
+        ):
+            self.assertIn(term, recovery)
+        for term in (
+            "<!-- strata-intent-policy:v2 -->", "문장 전체의 부정·조건·인용",
+            "설명만 원하나요, 실제 확인·수정까지 진행할까요?",
+            "설계 문서만 수정할까요, 코드 구현·리팩터링까지 진행할까요?",
+            "`설계 전용`, `문서 전용`, `구현` 중 하나",
+            "설계안, TODO, 인수 기준, 예시 코드는 구현 권한이 아니며",
+            "이미 허가된 미완료 작업은 범위를 유지하며 이어가되", "중지·보류·취소 요청이면 멈춘다",
+            "placeholder·mock·미연결 UI·하드코딩 시연을 완성 구현으로 대신하지 않는다",
+        ):
+            self.assertIn(term, basic)
 
     def test_malformed_config_is_preserved_and_refused(self):
         with tempfile.TemporaryDirectory() as temp:

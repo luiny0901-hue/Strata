@@ -2,6 +2,9 @@
 import json
 import tempfile
 import unittest
+import argparse
+import subprocess
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -34,7 +37,7 @@ class RemoteClientTests(unittest.TestCase):
     def test_fresh_remote_setup_shares_recovery_and_window_policy(self):
         name = self.install()
         config = json.loads(client.overlay_path(self.home).read_text(encoding="utf-8"))
-        self.assertEqual(config["agents"]["build"]["steps"], 60)
+        self.assertEqual(config["agents"]["build"]["steps"], 200)
         self.assertEqual(config["compaction"]["buffer"], 65536)
         self.assertEqual(config["permissions"][-1], {"action": "*", "resource": "*", "effect": "allow"})
         self.assertEqual(config["providers"]["strata"]["models"]["server"]["modelID"], "actual-server-id")
@@ -48,6 +51,14 @@ class RemoteClientTests(unittest.TestCase):
         self.assertEqual(server["environment"]["CUA_DRIVER_PERMISSION_MODE"], "standard")
         self.assertTrue(Path(server["command"][1]).is_file())
         self.assertTrue((client.client_dir(self.home) / "cua-driver/opencode-catalog.mjs").is_file())
+        for package_name in ('strata-acp-foreground-guard', 'strata-output-recovery'):
+            roots = [Path(p['package'] if isinstance(p,dict) else p) for p in config['plugins']]
+            target = next(p for p in roots if p.parent == client.client_dir(self.home) / package_name / 'versions')
+            asset = target / 'index.js'
+            self.assertTrue(asset.is_file())
+            self.assertTrue(any(p == str(asset.parent) or isinstance(p,dict) and p.get('package') == str(asset.parent) for p in config['plugins']))
+        entry = json.loads(client.acp_path(self.home).read_text(encoding='utf-8'))['agent_servers'][name]
+        self.assertEqual(entry['env']['OPENCODE_ACP_TURN_GUARD'], '1')
         self.assertNotIn("fixture-secret", client.overlay_path(self.home).read_text(encoding="utf-8"))
         self.assertEqual(self.install(), name)  # no duplicate synthetic ACP registration
         self.assertEqual(len(json.loads(client.acp_path(self.home).read_text(encoding="utf-8"))["agent_servers"]), 1)
@@ -59,6 +70,51 @@ class RemoteClientTests(unittest.TestCase):
         self.assertNotIn("cua-driver", config.get("mcp", {}))
         self.assertTrue((client.client_dir(self.home) / "scripts/run_bounded_command.sh").is_file())
         self.assertNotIn(b"\r", (client.client_dir(self.home) / "scripts/run_bounded_command.sh").read_bytes())
+        self.assertEqual(len(config['plugins']), 2)
+
+    def test_run_uses_existing_wrapper_and_preserves_arguments_and_exit(self):
+        self.install(False)
+        args=argparse.Namespace(home=str(self.home),opencode_args=['--','--version'])
+        with patch.object(client.subprocess,'run',return_value=subprocess.CompletedProcess([],7)) as run, patch('builtins.input',side_effect=AssertionError('run must not ask setup questions')):
+            self.assertEqual(client.do_run(args),7)
+        command=run.call_args.args[0]
+        self.assertEqual(command[-1],'--version')
+        self.assertTrue(any('opencode-strata' in part for part in command))
+        self.assertNotIn('fixture-secret',str(command))
+
+    def test_run_without_setup_reports_action_without_writing(self):
+        with self.assertRaisesRegex(client.SetupError,'setup'):
+            client.do_run(argparse.Namespace(home=str(self.home),opencode_args=[]))
+        self.assertFalse(client.client_dir(self.home).exists())
+
+    def test_existing_rea_registration_is_reused_without_setup_or_prompt(self):
+        with patch.object(client,'rea_already_configured',return_value=True), patch.object(client,'configure_rea_opencode') as setup, patch('builtins.input',side_effect=AssertionError('already configured')):
+            self.assertEqual(client.ensure_rea(),'configured')
+            setup.assert_not_called()
+
+    @unittest.skipUnless(os.name == 'nt', 'Real private ACL regression requires Windows')
+    def test_real_windows_secret_acl_with_unicode_path_and_repeated_write(self):
+        secret=self.home/'한글 키 with spaces'/'key'
+        client.write_secret(secret,'fixture-first')
+        self.assertTrue(client._check_windows_secret(secret))
+        client.write_secret(secret,'fixture-second')
+        self.assertEqual(secret.read_text(encoding='utf-8'),'fixture-second')
+        self.assertTrue(client._check_windows_secret(secret))
+
+    def test_setup_preserves_existing_acp_environment_and_checks_runtime_assets(self):
+        name = self.install(False)
+        path = client.acp_path(self.home)
+        document = json.loads(path.read_text(encoding='utf-8'))
+        document['agent_servers'][name]['env']['EXISTING_SENTINEL'] = 'keep'
+        path.write_text(json.dumps(document), encoding='utf-8')
+        self.install(False)
+        entry = json.loads(path.read_text(encoding='utf-8'))['agent_servers'][name]
+        self.assertEqual(entry['env']['EXISTING_SENTINEL'], 'keep')
+        self.assertEqual(entry['env']['OPENCODE_ACP_TURN_GUARD'], '1')
+        state = json.loads(client.state_path(self.home).read_text(encoding='utf-8'))
+        asset = next(Path(p) for p in state['asset_sha256'] if 'strata-output-recovery' in p and p.endswith('index.js'))
+        asset.unlink()
+        self.assertEqual(len(client.check_assets(state)), 1)
 
     def test_missing_node_is_caught_before_credentials_or_config_are_written(self):
         with patch("tools.configure_opencode_cua_automation._find_runtime_path", side_effect=ValueError("node missing")):

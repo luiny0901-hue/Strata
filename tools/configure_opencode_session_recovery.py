@@ -14,6 +14,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+if __package__:
+    from .opencode_runtime_assets import prepare_terminal_assets
+else:
+    from opencode_runtime_assets import prepare_terminal_assets
+
 DEFAULT_CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "opencode" / "opencode.json"
 DEFAULT_SOURCE = Path(__file__).resolve().parents[1] / "examples" / "opencode" / "STRATA_SESSION_RECOVERY_KO.md"
 INSTALLED_INSTRUCTIONS_NAME = "STRATA_SESSION_RECOVERY_KO.md"
@@ -130,7 +135,14 @@ def configure_policy(updated: dict[str, Any], context: int = DEFAULT_CONTEXT) ->
     compaction["auto"] = True
     keep["tokens"] = policy["keep"]
     compaction["buffer"] = policy["buffer"]
-    build["steps"] = 60
+    # Upgrade our old preset, but never clamp a user's explicit step budget.
+    current_steps = build.get("steps")
+    if current_steps is None:
+        build["steps"] = 200
+    elif isinstance(current_steps, bool) or not isinstance(current_steps, int) or current_steps <= 0:
+        raise ValueError("agents.build.steps must be a positive integer; no files were changed.")
+    elif current_steps == 60:
+        build["steps"] = 200
     policies = _rules(updated, "policies", "policies")
     for policy in UAC_DENY_POLICIES:
         if policy not in policies:
@@ -180,6 +192,7 @@ def apply_config(
 
     install_dir = instructions_dir.expanduser() if instructions_dir else config_path.parent
     target = install_dir / INSTALLED_INSTRUCTIONS_NAME
+    terminal_files = prepare_terminal_assets(install_dir)
     reference = _reference_for(target)
     if reference not in instructions:
         instructions.append(reference)
@@ -198,6 +211,14 @@ def apply_config(
 
     config_backup = _backup(config_path) if config_changed and existed else None
     instruction_backup = _backup(target) if instruction_changed and instruction_exists else None
+    terminal_changed = []
+    for path, data in terminal_files.items():
+        if path.exists() and path.read_bytes() == data:
+            continue
+        if path.exists():
+            _backup(path)
+        _atomic_write(path, data.decode('utf-8'))
+        terminal_changed.append(str(path))
 
     if instruction_changed:
         mode = stat.S_IMODE(target.stat().st_mode) if instruction_exists else None
@@ -215,6 +236,7 @@ def apply_config(
         "config_backup": str(config_backup) if config_backup else None,
         "instructions_backup": str(instruction_backup) if instruction_backup else None,
         "context": context,
+        "terminal_files_changed": terminal_changed,
     }
 
 
@@ -233,6 +255,8 @@ def main() -> int:
     print(f"Compaction context: {result['context']}")
     print(f"Config changed: {result['config_changed']}")
     print(f"Instructions changed: {result['instructions_changed']}")
+    for path in result['terminal_files_changed']:
+        print(f"Terminal asset updated: {path}")
     if result["config_backup"]:
         print(f"Config backup: {result['config_backup']}")
     if result["instructions_backup"]:

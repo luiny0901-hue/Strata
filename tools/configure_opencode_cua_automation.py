@@ -299,6 +299,7 @@ def prepare_configuration(
     template_contents = {
         wrapper_target: (source_root / "tools" / "cua-driver" / "opencode-mcp.mjs").read_bytes(),
         cua_dir / "opencode-catalog.mjs": (source_root / "tools/cua-driver/opencode-catalog.mjs").read_bytes(),
+        cua_dir / "opencode-grounding.mjs": (source_root / "tools/cua-driver/opencode-grounding.mjs").read_bytes(),
         module_target: (source_root / "tools" / "cua-driver" / "opencode-policy.mjs").read_bytes(),
         policy_target: (source_root / "tools" / "cua-driver" / "opencode-window-scoped.rego").read_bytes(),
         installed_doc: doc_content,

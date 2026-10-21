@@ -1,5 +1,6 @@
 """REA integration tests use subprocess fixtures only; no package install occurs."""
 import subprocess
+import json
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -81,6 +82,36 @@ class ReaIntegrationTests(unittest.TestCase):
             with self.assertRaisesRegex(rea.ReaSetupError, "subagent"):
                 rea.verify_tool_scope(config)
 
+    def test_reconstruction_handoff_upgrades_only_known_previous_agent(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as temporary:
+            config=Path(temporary)/'opencode.json'
+            config.write_text(json.dumps({'agent':{'rea_analysis':rea.PREVIOUS_REA_AGENT},'keep':'sentinel'}),encoding='utf-8')
+            self.assertTrue(rea.apply_tool_scope(config))
+            document=json.loads(config.read_text(encoding='utf-8'))
+            self.assertEqual(document['keep'],'sentinel')
+            prompt=document['agent']['rea_analysis']['prompt']
+            self.assertIn('implementation handoff',prompt)
+            self.assertIn('Analysis-only requests never authorize implementation',prompt)
+            self.assertIn('Static resources alone do not prove rendered UI',prompt)
+            self.assertIn('source selection does not implicitly analyze dependencies',prompt)
+            self.assertIn('never report partial coverage as complete',prompt)
+            self.assertIn('not tools assumed from newer documentation',prompt)
+            rea.verify_tool_scope(config)
+
+    def test_previous_reconstruction_agent_migrates_without_duplicate_or_install(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as temporary:
+            config=Path(temporary)/'opencode.json'
+            config.write_text(json.dumps({'agent':{'rea_analysis':rea.RECONSTRUCTION_REA_AGENT},'mcp':{'sentinel':{}}}),encoding='utf-8')
+            with patch.object(rea.subprocess,'run') as run:
+                self.assertTrue(rea.apply_tool_scope(config))
+                self.assertFalse(rea.apply_tool_scope(config))
+                run.assert_not_called()
+            document=json.loads(config.read_text(encoding='utf-8'))
+            self.assertEqual(document['mcp'],{'sentinel':{}})
+            self.assertEqual(list(document['agent']),['rea_analysis'])
+
     def test_tool_scope_preserves_conflicting_agent_definition(self):
         import json
         import tempfile
@@ -94,9 +125,9 @@ class ReaIntegrationTests(unittest.TestCase):
     def test_setup_client_preserves_strata_setup_when_rea_declined_or_fails(self):
         from tools.remote_agent_client import setup_client
 
-        with patch("builtins.input", return_value="n"):
+        with patch.object(setup_client, 'rea_already_configured', return_value=False), patch("builtins.input", return_value="n"):
             self.assertEqual(setup_client.ensure_rea(), "declined")
-        with patch("builtins.input", return_value=""), \
+        with patch.object(setup_client, 'rea_already_configured', return_value=False), patch("builtins.input", return_value=""), \
              patch.object(setup_client, "configure_rea_opencode", side_effect=rea.ReaSetupError("network down")):
             self.assertEqual(setup_client.ensure_rea(), "setup-failed")
 

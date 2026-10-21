@@ -20,7 +20,7 @@ window_target(args) if {
 }
 
 window_target(args) if {
-  args.scope == "window"
+  not args.scope == "desktop"
   args.pid > 0
   args.window_id > 0
   not args.target.kind == "desktop"
@@ -58,7 +58,6 @@ allow if {
   window_delivery(input.arguments)
 }
 
-# App launch remains available; process termination is not exposed by this proxy.
-allow if { input.tool == "launch_app" }
+# GUI app launch can steal focus; it is not exposed by this background-only proxy.
 
 default allow := false

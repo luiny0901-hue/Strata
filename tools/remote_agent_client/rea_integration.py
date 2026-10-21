@@ -27,7 +27,7 @@ LEGACY_REA_AGENT = {
     "mode": "subagent",
     "tools": {REA_TOOL_GLOB: True},
 }
-REA_AGENT = {
+PREVIOUS_REA_AGENT = {
     "description": (
         "Automatically select this subagent when the user asks to analyze, inspect, "
         "reverse engineer, compare, or investigate an authorized local executable, DLL, "
@@ -40,6 +40,47 @@ REA_AGENT = {
         "Use REA only for artifacts the user is authorized to inspect. Never modify, execute, "
         "launch, install, upload, or delete the target. Select the narrowest suitable REA "
         "analysis route, distinguish evidence from inference, and report findings in Korean."
+    ),
+}
+
+REA_AGENT = {
+    **PREVIOUS_REA_AGENT,
+    'description': PREVIOUS_REA_AGENT['description'] + (
+        ' Also select for reconstructing an existing application or using its observed UI '
+        'and behavior as the basis for a new program; return an evidence-based implementation handoff.'
+    ),
+    'prompt': PREVIOUS_REA_AGENT['prompt'] + (
+        ' For reconstruction, return the exact target path/version/hash when available, artifact type, '
+        'observed entry points/modules/data formats/interfaces and behavior, UI-related resources and '
+        'state transitions supported by evidence, plus focused evidence references and limitations. '
+        'Separate recovered source, decompiler pseudocode, observed behavior and inference. '
+        'Static resources alone do not prove rendered UI or runtime behavior. Use only advertised tools '
+        'and available providers; report unsupported parts instead of inventing results. '
+        'Return a bounded implementation handoff for the parent coding agent: reusable components '
+        'with known provenance, proposed module boundaries, acceptance scenarios and unresolved gaps. '
+        'Do not implement or modify the original target. Analysis-only requests never authorize implementation.'
+    ),
+}
+
+
+RECONSTRUCTION_REA_AGENT = REA_AGENT
+REA_AGENT = {
+    **RECONSTRUCTION_REA_AGENT,
+    'prompt': RECONSTRUCTION_REA_AGENT['prompt'] + (
+        ' Identify the actual artifact format, architecture and version rather than assuming from its extension. '
+        'For Electron/JavaScript use the advertised application route; for managed assemblies use managed '
+        'inspection; for native binaries use only an available native provider; archives and APKs need '
+        'their advertised package routes. An executable is not automatically a managed assembly. '
+        'Tie every evidence reference to its target identity and invalidate it when the target changes. '
+        'For large targets select relevant sources/functions and bounded pages; source selection does not '
+        'implicitly analyze dependencies. On timeout return collected partial evidence, remaining scope and '
+        'retryability; never report partial coverage as complete or restart the entire analysis blindly. '
+        'Missing engines, unsupported formats, encrypted/packed regions and remote server behavior are '
+        'explicit gaps, not recovered implementation. Do not auto-install engines or execute the target. '
+        'Use currently advertised schemas, not tools assumed from newer documentation. '
+        'The handoff must map each requested feature/UI state to evidence, implementation readiness, '
+        'a concrete verification scenario and any blocker. Continue supported analysis without silently '
+        'substituting another target. Screenshots or static UI resources do not prove internal equivalence.'
     ),
 }
 
@@ -118,7 +159,7 @@ def apply_tool_scope(config_path: Path) -> bool:
     if not isinstance(tools, dict) or not isinstance(agents, dict):
         raise ReaSetupError("OpenCode의 tools 또는 agent 설정 형식이 예상과 다릅니다.")
     existing = agents.get(REA_AGENT_NAME)
-    if existing is not None and existing not in (LEGACY_REA_AGENT, REA_AGENT):
+    if existing is not None and existing not in (LEGACY_REA_AGENT, PREVIOUS_REA_AGENT, RECONSTRUCTION_REA_AGENT, REA_AGENT):
         raise ReaSetupError(
             f"OpenCode agent '{REA_AGENT_NAME}'이 이미 다른 설정으로 존재합니다. 기존 설정을 보존했습니다."
         )

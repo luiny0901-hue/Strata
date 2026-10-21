@@ -31,7 +31,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 from tools.configure_opencode_cua_automation import locate_cua_driver, prepare_configuration
 from tools.configure_opencode_session_recovery import configure_policy, DEFAULT_SOURCE as RECOVERY_SOURCE
-from tools.remote_agent_client.rea_integration import ReaSetupError, configure_opencode as configure_rea_opencode, doctor_opencode as doctor_rea_opencode
+from tools.opencode_runtime_assets import ACP_ENV, prepare_runtime_assets, prepare_terminal_assets
+from tools.remote_agent_client.rea_integration import ReaSetupError, configure_opencode as configure_rea_opencode, doctor_opencode as doctor_rea_opencode, verify_tool_scope as verify_rea_scope, opencode_config_path as rea_config_path, REA_PACKAGE
 
 EXAMPLE_DIR = REPO_ROOT / "examples" / "opencode"
 PROFILE_FILE = EXAMPLE_DIR / "autonomous-agent-v2.fragment.json"
@@ -248,17 +249,30 @@ def atomic_write(path: Path, data: bytes, mode: int = 0o600) -> None:
 
 
 def secure_windows_directory(path: Path) -> None:
-    whoami = subprocess.run(["whoami"], capture_output=True, text=True, check=False)
-    if whoami.returncode != 0 or not whoami.stdout.strip():
-        raise SetupError("현재 Windows 사용자 ACL을 확인할 수 없어 API 키 파일을 쓰지 않았습니다.")
+    powershell = shutil.which('powershell.exe') or shutil.which('pwsh')
+    if not powershell:
+        raise SetupError('키 폴더 권한 설정에 필요한 PowerShell을 찾을 수 없습니다.')
     path.mkdir(parents=True, exist_ok=True)
-    account = whoami.stdout.strip()
-    result = subprocess.run(
-        ["icacls", str(path), "/reset", "/inheritance:r", "/grant:r", f"{account}:(OI)(CI)F"],
-        capture_output=True,
-        text=True,
-        check=False,
+    # Apply a new DACL once; do not temporarily reset existing secrets to inherited grants.
+    script = (
+        "$ErrorActionPreference='Stop'; "
+        "$sid=[Security.Principal.WindowsIdentity]::GetCurrent().User; "
+        "$acl=[Security.AccessControl.DirectorySecurity]::new(); "
+        "$acl.SetAccessRuleProtection($true,$false); $acl.SetOwner($sid); "
+        "$flags=[Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit; "
+        "$rule=[Security.AccessControl.FileSystemAccessRule]::new($sid,[Security.AccessControl.FileSystemRights]::FullControl,$flags,[Security.AccessControl.PropagationFlags]::None,[Security.AccessControl.AccessControlType]::Allow); "
+        "$acl.AddAccessRule($rule); "
+        "if($PSVersionTable.PSEdition -eq 'Core'){[IO.FileSystemAclExtensions]::SetAccessControl([IO.DirectoryInfo]::new($env:STRATA_ACL_DIRECTORY),$acl)}"
+        "else{[IO.Directory]::SetAccessControl($env:STRATA_ACL_DIRECTORY,$acl)}"
     )
+    try:
+        result = subprocess.run(
+            [powershell, '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script],
+            env={**os.environ, 'STRATA_ACL_DIRECTORY': str(path.resolve())},
+            capture_output=True, text=True, check=False, timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        raise SetupError('키 폴더 권한 설정을 완료하지 못했습니다. 키는 기록하지 않았습니다.') from None
     if result.returncode != 0:
         raise SetupError("API 키 디렉터리 ACL을 현재 사용자 전용으로 설정하지 못했습니다.")
 
@@ -405,8 +419,27 @@ def ensure_cua_driver(home: Path) -> tuple[Path | None, str]:
     return driver, "installed"
 
 
+def rea_already_configured() -> bool:
+    """Recognize our current pinned registration without spawning npm or touching config."""
+    path = rea_config_path()
+    try:
+        verify_rea_scope(path)
+        document = json.loads(path.read_text(encoding='utf-8-sig'))
+        mcp = document.get('mcp', {})
+        server = mcp.get('servers', {}).get('rea') or mcp.get('rea')
+        return (isinstance(server, dict) and not server.get('disabled', False)
+                and server.get('type') == 'local'
+                and isinstance(server.get('command'), list)
+                and REA_PACKAGE in server['command'])
+    except (OSError, ValueError, ReaSetupError, AttributeError):
+        return False
+
+
 def ensure_rea() -> str:
     """Configure the optional REA MCP through REA's own setup transaction."""
+    if rea_already_configured():
+        print('REA: 현재 버전의 기존 등록·분석 범위를 재사용합니다. 실제 연결은 doctor로 확인하세요.')
+        return 'configured'
     print("REA는 로컬 파일·앱을 근거와 함께 분석하는 별도 MCP 도구입니다.")
     print("공식 REA setup은 OpenCode MCP 등록과 REA 분석 지침만 추가하고 기존 설정은 백업합니다.")
     print("Ghidra·IDA·Hopper 같은 선택 분석 엔진은 설치하거나 변경하지 않습니다.")
@@ -543,7 +576,11 @@ def merge_acp(path: Path, command: str, args: list[str]) -> tuple[dict[str, Any]
             break
         name = f"{base_name} ({number})"
         number += 1
-    servers[name] = {"command": command, "args": args}
+    entry = servers.get(name, {})
+    environment = entry.get("env", {})
+    if not isinstance(environment, dict):
+        raise SetupError("OpenCode ACP env는 JSON 객체여야 합니다.")
+    servers[name] = {**entry, "command": command, "args": args, "env": {**environment, **ACP_ENV}}
     return value, name
 
 
@@ -587,6 +624,7 @@ def write_setup(
     recovery_dest = client_dir(home) / "STRATA_SESSION_RECOVERY_KO.md"
     config["instructions"].append(_tilde_path(recovery_dest, home))
     files = {recovery_dest: RECOVERY_SOURCE.read_bytes()}
+    files.update(prepare_runtime_assets(config, client_dir(home)))
     if cua_driver is not None:
         try:
             _, cua_files = prepare_configuration(
@@ -606,16 +644,17 @@ def write_setup(
 
     # Render/read all assets before writing credentials or publishing the ACP entry.
     files[instructions_dest] = instructions_bytes
-    for name in ("run_bounded_command.ps1", "run_bounded_command.sh"):
-        files[client_dir(home) / "scripts" / name] = (REPO_ROOT / "tools/opencode" / name).read_bytes().replace(b"\r\n", b"\n")
+    files.update(prepare_terminal_assets(client_dir(home)))
     runner_instructions = client_dir(home) / "TERMINAL_KO.md"
     config["instructions"].append(_tilde_path(runner_instructions, home))
     scripts = client_dir(home) / "scripts"
     files[runner_instructions] = (
         "# 터미널 실행\n"
         "빌드·테스트는 비대화형으로 실행하고 timeout·종료 코드·로그를 확인한다.\n"
-        f"Windows PowerShell 7: & {_powershell_literal(str(scripts / 'run_bounded_command.ps1'))} -WorkingDirectory (Get-Location).Path -TimeoutSeconds 900 -Command '프로젝트 검증 명령'\n"
-        f"Linux/macOS: bash {_shell_literal((scripts / 'run_bounded_command.sh').as_posix())} --timeout 900 -- 검증명령\n"
+        "긴 PowerShell 코드는 UTF-8 .ps1로 저장한 뒤 실행기의 -CommandFile 경로를 사용한다. 관리자 작업은 -RequireAdministrator로 현재 권한을 먼저 검사하고, BLOCKED_UAC이면 권한 상승 창을 열지 말고 보고한다.\n"
+        f"Windows PowerShell 7: & {_powershell_literal(str(scripts / 'run_bounded_command.ps1'))} -WorkingDirectory (Get-Location).Path -TimeoutSeconds 120 -Command '프로젝트 검증 명령'\n"
+        f"Linux/macOS: bash {_shell_literal((scripts / 'run_bounded_command.sh').as_posix())} --timeout 120 -- 검증명령\n"
+        "짧은 조회는 15~30초, 긴 빌드·관측은 예상 시간에 여유를 더한 유한 제한을 명시한다. 위 예시를 모든 작업에 고정하지 않는다.\n"
         "macOS에서는 GNU timeout(gtimeout)이 필요하다. 없으면 설치된 실행기의 제한 시간 기능을 사용하고 무제한으로 우회하지 않는다. WSL에서는 Linux에 설치된 도구와 작업 디렉터리를 사용한다.\n"
     ).encode("utf-8")
     files[overlay_path(home).resolve()] = (json.dumps(config, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
@@ -645,7 +684,7 @@ def write_setup(
         "rea_setup_status": rea_status,
         "rea_client": "opencode",
         "rea_package": "rea-agents@6.7.0",
-        "setup_revision": 3,
+        "setup_revision": 7,
         "asset_sha256": {str(path): hashlib.sha256(data).hexdigest() for path, data in files.items()},
     }
     atomic_write(state_path(home), (json.dumps(state, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
@@ -700,7 +739,7 @@ def do_setup(args: argparse.Namespace) -> int:
             print("CUA Driver는 설치됐지만 macOS 앱/권한 요청을 시작하지 못했습니다.")
 
     if rea_status == "configured":
-        print("  REA: OpenCode MCP 및 분석 지침을 등록했습니다. OpenCode/Rider를 완전히 다시 시작하세요.")
+        print("  REA: MCP 등록·분석 범위가 준비됐습니다(기존 등록 재사용 포함). OpenCode/Rider를 다시 시작하세요.")
     elif rea_status == "declined":
         print("  REA: 설치를 건너뛰었습니다. setup을 다시 실행하면 등록할 수 있습니다.")
     else:
@@ -940,6 +979,28 @@ def do_doctor(args: argparse.Namespace) -> int:
     return 1 if failures else 0
 
 
+def do_run(args: argparse.Namespace) -> int:
+    """Start the existing configured wrapper, without setup prompts or network probes."""
+    home = Path(args.home).expanduser() if args.home else Path.home()
+    wrapper = client_dir(home) / 'bin' / ('opencode-strata.ps1' if os.name == 'nt' else 'opencode-strata')
+    if not wrapper.is_file() or not overlay_path(home).is_file() or not key_path(home).is_file():
+        raise SetupError('클라이언트 설정이 없습니다. 먼저 같은 실행 파일에 setup을 전달하세요.')
+    forwarded = list(args.opencode_args)
+    if forwarded[:1] == ['--']:
+        forwarded = forwarded[1:]
+    if os.name == 'nt':
+        powershell = shutil.which('powershell.exe') or shutil.which('pwsh')
+        if not powershell:
+            raise SetupError('PowerShell을 찾을 수 없습니다. doctor로 설치 상태를 확인하세요.')
+        command = [powershell, '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(wrapper), *forwarded]
+    else:
+        command = [str(wrapper), *forwarded]
+    try:
+        return subprocess.run(command, check=False).returncode
+    except OSError:
+        raise SetupError('OpenCode 실행기를 시작하지 못했습니다. 같은 진입점에 doctor를 전달하세요.') from None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -950,6 +1011,10 @@ def main(argv: list[str] | None = None) -> int:
     doctor = sub.add_parser("doctor", help="현재 클라이언트 연결을 점검")
     doctor.add_argument("--home", help=argparse.SUPPRESS)
     doctor.set_defaults(run=do_doctor)
+    run = sub.add_parser('run', help='설정된 Strata OpenCode 실행 (추가 설정 질문 없음)')
+    run.add_argument('--home', help=argparse.SUPPRESS)
+    run.add_argument('opencode_args', nargs=argparse.REMAINDER, help='-- 뒤에 OpenCode 인자 전달')
+    run.set_defaults(run=do_run)
     args = parser.parse_args(argv)
     try:
         return args.run(args)

@@ -10,6 +10,7 @@ import sys
 import tempfile
 import time
 import unittest
+import threading
 from pathlib import Path
 
 
@@ -27,7 +28,7 @@ class WindowsCommandRunnerTests(unittest.TestCase):
         if not cls.pwsh:
             raise unittest.SkipTest("PowerShell 7 (pwsh) is not installed")
 
-    def run_runner(self, command: str, log_directory: Path, timeout: int = 10) -> subprocess.CompletedProcess[str]:
+    def run_runner(self, command: str, log_directory: Path, timeout: int = 10, extra_args=()) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [
                 self.pwsh,
@@ -45,6 +46,7 @@ class WindowsCommandRunnerTests(unittest.TestCase):
                 "1",
                 "-LogDirectory",
                 str(log_directory),
+                *extra_args,
             ],
             capture_output=True,
             text=True,
@@ -66,6 +68,92 @@ class WindowsCommandRunnerTests(unittest.TestCase):
             result = self.run_runner("cmd.exe /d /c exit 7", Path(temporary))
         self.assertEqual(result.returncode, 7, result.stderr)
         self.assertIn("EXIT_CODE=7", result.stdout)
+
+    def test_powershell_error_is_not_reported_as_success(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            result = self.run_runner("Write-Error 'EXPECTED_CMDLET_FAILURE'", Path(temporary))
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+
+    def test_interactive_prompt_fails_without_waiting_or_false_success(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            result = self.run_runner("Read-Host 'Do not prompt an agent'", Path(temporary))
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+
+    def test_uac_requests_are_refused_before_starting_anything(self) -> None:
+        for command in ["Start-Process pwsh -Verb RunAs", "Start-Process pwsh -Verb:RunAs", "Start-Process pwsh -V RunAs", "saps pwsh -ver:RunAs", "runas /user:Administrator cmd", "$verb = 'RunAs'; Start-Process pwsh -Verb $verb"]:
+            with self.subTest(command=command), tempfile.TemporaryDirectory() as temporary:
+                result = self.run_runner(command, Path(temporary))
+                self.assertEqual(result.returncode, 77, result.stderr)
+                self.assertIn('BLOCKED_UAC', result.stderr)
+
+    def test_quoted_elevation_word_is_not_a_command(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            result = self.run_runner("Write-Output 'runas is a word here'", Path(temporary))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_required_admin_context_does_not_open_an_elevation_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            result = self.run_runner("Write-Output ADMIN_CONTEXT_OK", Path(temporary), extra_args=['-RequireAdministrator'])
+            self.assertIn(result.returncode, (0,77), result.stderr)
+            if result.returncode == 77:
+                self.assertNotIn('ADMIN_CONTEXT_OK', result.stdout)
+                self.assertIn('BLOCKED_UAC', result.stderr)
+            else:
+                self.assertIn('ADMIN_CONTEXT_OK', result.stdout)
+
+    def confirmation_fixture(self, base):
+        script = base / 'gate.py'
+        approval = base / 'approved'
+        result = base / 'result'
+        script.write_text('import pathlib,sys,time\na=pathlib.Path(sys.argv[1]);r=pathlib.Path(sys.argv[2])\nend=time.monotonic()+8\nwhile not a.exists() and time.monotonic()<end: time.sleep(.05)\nif a.exists(): r.write_text("approved")\nelse: raise SystemExit(1)\n', encoding='utf-8')
+        quote = lambda x: "'" + str(x).replace("'", "''") + "'"
+        command = '& ' + ' '.join(map(quote, (sys.executable, script, approval, result)))
+        return command, approval, result
+
+    def test_delayed_non_uac_confirmation_finishes_same_invocation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            command, approval, output = self.confirmation_fixture(base)
+            timer = threading.Timer(1.5, lambda: approval.write_text('yes'))
+            timer.start()
+            try:
+                result = self.run_runner(command, base / 'logs', timeout=6)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(output.read_text(), 'approved')
+            finally:
+                timer.join()
+
+    def test_late_confirmation_after_timeout_does_not_restart_command(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            command, approval, output = self.confirmation_fixture(base)
+            result = self.run_runner(command, base / 'logs', timeout=1)
+            self.assertEqual(result.returncode, 124, result.stderr)
+            approval.write_text('too late')
+            time.sleep(0.3)
+            self.assertFalse(output.exists(), 'Timed-out confirmation process continued in the background')
+
+    def test_large_output_goes_to_complete_logs_with_bounded_preview(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            result = self.run_runner("[Console]::Write('x' * 200000)", Path(temporary))
+            log = next(Path(temporary).glob('*.stdout.log'))
+            self.assertEqual(log.stat().st_size, 200000)
+            self.assertLess(len(result.stdout), 26000)
+            self.assertFalse(list(Path(temporary).glob('*.command.ps1')))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_long_unicode_script_file_works_from_windows_powershell_51(self) -> None:
+        ps51 = shutil.which('powershell.exe')
+        if not ps51:
+            self.skipTest('Windows PowerShell 5.1 unavailable')
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary) / '한글 경로 with spaces'
+            base.mkdir()
+            script = base / '긴 스크립트.ps1'
+            script.write_text('# long script\n' * 10000 + "Write-Output '한글 출력 성공'\n", encoding='utf-8')
+            result = subprocess.run([ps51, '-NoProfile', '-NonInteractive', '-File', str(POWERSHELL_RUNNER), '-CommandFile', str(script), '-WorkingDirectory', str(base), '-LogDirectory', str(base / 'logs'), '-TimeoutSeconds', '10'], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=25)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('한글 출력 성공', result.stdout)
 
     def test_timeout_kills_the_exact_command_tree(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

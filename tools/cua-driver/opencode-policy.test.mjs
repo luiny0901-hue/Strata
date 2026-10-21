@@ -31,6 +31,7 @@ test("rejects unsupported delivery modes and malformed window targets", () => {
 
 test("does not expose process termination", () => {
   assert.equal(isSafeCall("kill_app", { pid: 30216 }), false);
+  assert.equal(isSafeCall("launch_app", { path:'notepad.exe' }), false);
 });
 
 import { prepareCall } from "./opencode-policy.mjs";
