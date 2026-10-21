@@ -36,6 +36,8 @@ td.log
 !/run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-on.bat
 !/run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-off.bat
 /run-*.sh
+!/run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-on.sh
+!/run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-off.sh
 /strata-*.json
 /strata-*.log
 /build-strata.bat

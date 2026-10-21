@@ -1,4 +1,8 @@
-# Windows Strata를 OpenCode, Rider, Hermes에서 사용하기
+# Windows·Linux Strata를 OpenCode, Rider, Hermes에서 사용하기
+
+Linux NVFP4 ON/OFF 실행 경로와 Windows·Apple Silicon Mac 클라이언트 조합은
+[Linux 서버 준비 안내](LINUX_NVFP4_SERVER_KO.md)를 참고하세요.
+Linux 경로는 추가했지만 실행 검증하지 않았습니다. 아래 Windows 방화벽 절차는 Windows 서버 전용입니다.
 
 > 현재 통합 설치/복원 진입점은 [OPENCODE_QUICKSTART_KO.md](OPENCODE_QUICKSTART_KO.md)입니다. 아래의 이전 수동 설정 예시보다 통합 설치기를 우선 사용하세요.
 
