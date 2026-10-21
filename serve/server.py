@@ -193,21 +193,27 @@ def reasoning_repeat_coverage(text):
 
 
 def focused_recovery_prompt(tok, ids, generated):
-    """The prompt's ids with the xhigh effort sentence of the first system message replaced by the low one, then
-    every token generated so far.  A splice of token ids: the prompt is never decoded and encoded again, so a literal
-    `</think>` or vision marker in it (#537, #554) stays what it was.  None when the sentence is not there as whole
-    tokens in the first system message (a user's text never counts).  No answer or end-of-thinking is inserted."""
+    """Return the original prompt with low-effort guidance in its first system message, then generated ids.
+
+    Replace a recognized effort sentence when present; otherwise insert the guidance after the system header. This
+    keeps recovery independent of the client's selected effort level. The prompt is spliced as token ids, never
+    decoded/re-encoded, so literal think or vision markers remain unchanged. User text is never rewritten.
+    """
     end = tok.encode(IM_END, parse_special=True)
-    if len(end) != 1 or end[0] not in ids:
+    system = tok.encode('<|im_start|>system\n', parse_special=True)
+    if len(end) != 1 or len(system) > len(ids) or ids[:len(system)] != system or end[0] not in ids:
         return None
     head = ids[:ids.index(end[0])]
-    if not tok.decode(head).startswith("<|im_start|>system\n"):
-        return None
-    old, new = tok.encode(HIGH_EFFORT, parse_special=False), tok.encode(LOW_EFFORT, parse_special=False)
-    for i in range(len(head) - len(old) + 1):
-        if head[i:i + len(old)] == old:
-            return ids[:i] + new + ids[i + len(old):] + list(generated)
-    return None
+    new = tok.encode(LOW_EFFORT, parse_special=False)
+    for effort in EFFORT_TEXT.values():
+        old = tok.encode(effort, parse_special=False)
+        for i in range(len(head) - len(old) + 1):
+            if head[i:i + len(old)] == old:
+                return ids[:i] + new + ids[i + len(old):] + list(generated)
+    # OpenCode and other clients need not include Strata's native effort sentence.
+    # Append inside the first system message; if that boundary is malformed, fail closed.
+    separator = tok.encode("\n\n", parse_special=False)
+    return ids[:len(head)] + separator + new + ids[len(head):] + list(generated)
 
 
 LOOPBACK_NAMES = ("localhost", "127.0.0.1", "::1")
@@ -6948,6 +6954,10 @@ def main() -> int:
         raise KeyboardInterrupt
     try:
         signal.signal(signal.SIGTERM, on_sigterm)
+        # On Windows, closing the console that hosts a .bat server sends CTRL_BREAK, not SIGTERM.
+        # Route it through the same orderly HTTP/engine cleanup path as Ctrl+C.
+        if hasattr(signal, "SIGBREAK"):
+            signal.signal(signal.SIGBREAK, on_sigterm)
     except (ValueError, OSError, AttributeError):         # not the main thread
         pass
     try:
