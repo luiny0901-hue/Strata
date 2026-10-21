@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install the window-scoped OpenCode CUA policy and foreground escalation."""
+"""Install window-scoped background-only CUA input without the user's pointer."""
 
 from __future__ import annotations
 
@@ -28,16 +28,18 @@ NEW_DISCOVERY_LINE = (
     "- 작업 시작 때 `list_windows`로 앱과 PID/HWND를 한 번 식별하고 같은 창을 다루는 동안 재사용한다. "
     "앱 재시작, 새 창 생성, ID 오류·불일치가 생긴 경우에만 목록을 다시 읽는다. 첫 입력 전에는 해당 창의 `get_window_state`를 읽는다."
 )
-NEW_DELIVERY_LINE = (
+PREVIOUS_DELIVERY_LINE = (
     '- 입력은 정확한 창 PID/HWND 대상으로 `background`부터 시도한다. '
     '드라이버의 `background_unavailable` 응답 또는 새 화면 상태에서 확인된 명백한 무동작 후에만 '
     '같은 동작을 같은 창에 `delivery_mode: "foreground"`로 한 번 재시도할 수 있다.'
 )
-NEW_STOP_LINE = (
+PREVIOUS_STOP_LINE = (
     "- `foreground`는 대상 창을 잠시 활성화해 실제 입력을 전달한다. 사용자의 입력을 방해할 수 있거나 "
     "창 정체·결과가 불명확하면 사용하지 않는다. 데스크톱 전체 대상, 전역 입력, 셸/네이티브 입력 우회는 계속 금지하며, "
     "권한 거부나 확인되지 않은 결과에서는 멈춘다."
 )
+NEW_DELIVERY_LINE = '- 입력은 정확한 창 PID/HWND 대상으로 `delivery_mode:"background"`만 사용한다. AI 전용 커서는 cua-driver의 `move_cursor` 오버레이만 사용한다. 사용자 마우스·물리 포인터·foreground·SendInput은 금지한다.'
+NEW_STOP_LINE = '- `background_unavailable` 또는 확인된 무동작이면 `BACKGROUND_ONLY_UNSUPPORTED`로 멈추고 보고한다. 사용자 마우스, 전역 입력, 셸/네이티브 입력으로 전환하지 않는다. 창 정체·결과가 불명확하거나 권한이 거부되면 멈춘다.'
 NEW_IDENTITY_LINE = (
     "- 앱/창 정체성은 작업 시작과 결과 검증 때 확인한다. 동일 창에서 연속 작업 중에는 `list_windows`를 매번 반복하지 않는다. "
     "새 창 출현, 창 닫힘, PID/HWND 오류·불일치가 나타날 때만 목록을 다시 조회한다."
@@ -127,7 +129,9 @@ def _patch_gui_instructions(path: Path) -> bytes | None:
     old_prefixes = (OLD_DISCOVERY_PREFIX, OLD_DELIVERY_PREFIX, OLD_STOP_PREFIX, OLD_IDENTITY_PREFIX, OLD_STABILITY_PREFIX)
     new_lines = (NEW_DISCOVERY_LINE, NEW_DELIVERY_LINE, NEW_STOP_LINE, NEW_IDENTITY_LINE, NEW_STABILITY_LINE)
     old_matches = [
-        [i for i, line in enumerate(lines) if line.rstrip("\r\n").startswith(prefix)]
+        [i for i, line in enumerate(lines) if line.rstrip("\r\n").startswith(prefix)
+         or (prefix == OLD_DELIVERY_PREFIX and line.rstrip("\r\n") == PREVIOUS_DELIVERY_LINE)
+         or (prefix == OLD_STOP_PREFIX and line.rstrip("\r\n") == PREVIOUS_STOP_LINE)]
         for prefix in old_prefixes
     ]
     new_matches = [

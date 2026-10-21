@@ -4,7 +4,7 @@
 - 시작 때 `list_windows`로 정확한 PID/창 ID를 식별하고 `get_window_state`로 화면을 읽는다. 동일 창에서는 목록을 재사용하며 앱 재시작·새 창·ID 불일치 때 다시 찾는다.
 - 표준 컨트롤은 최신 `element_token`으로 조작한다. 좌표는 최근 스크린샷에 보이는 접근성 없는 표면에서만 사용한다. 입력 후 결과를 확인하고 새 snapshot의 토큰으로 진행한다.
 - 접근성 정보가 충분하면 `since:snapshot_id`, `include_screenshot:false`로 변경 트리만 읽는다. 캔버스·픽셀 변화·빈 트리·불확실한 결과에는 스크린샷이 필요하다. 큰 트리는 query/max_depth/max_elements로 좁히고, 잘린 정보를 추측하지 않는다.
-- 정확한 같은 창에 background부터 입력한다. `background_unavailable` 또는 새 상태에서 확인한 명백한 무동작에만 foreground로 한 번 재시도한다. 사용자 입력 중이거나 포커스·대상·결과가 불명확하면 멈춘다.
+- 정확한 같은 창에 `delivery_mode:"background"`만 사용한다. AI 전용 커서는 `move_cursor` 오버레이만 사용하며 사용자 마우스·물리 포인터·foreground·SendInput을 사용하지 않는다. `background_unavailable` 또는 확인된 무동작이면 `BACKGROUND_ONLY_UNSUPPORTED`로 멈추고 보고한다. 사용자 마우스로 전환하거나 셸/네이티브 입력으로 우회하지 않는다.
 - 데스크톱 전체 입력, 권한 우회, 셸/네이티브 입력 우회는 금지한다. 권한 거부는 중단 사유다. stale 토큰은 새 상태로 한 번만 재표적화한다. PostMessage 성공만으로 UI 성공이라 하지 않는다.
 - UAC 보안 데스크톱은 현재 창 대상이 아니며 CUA로 승인할 수 없다. UAC가 나타나거나 관리자 권한이 필요하면 어떤 버튼도 누르려 하지 말고 `BLOCKED_UAC`와 필요한 사용자 조치를 보고한 뒤 끝낸다. 승인 대기·폴링·재시도는 금지한다.
 - 일반 프로그램의 확인 창은 UAC가 아니다. 정확히 식별한 소유 프로세스·창에서만 결과 상태를 확인하고, 완료 증거가 나온 경우에만 다음 작업으로 진행한다. 제한 시간 안에 확인이 끝나지 않으면 `WAITING_FOR_USER_CONFIRMATION`으로 멈추며, 늦은 승인은 새 `승인 완료, 계속` 요청에서 한 번만 재확인한다. 같은 실행·클릭을 반복하지 않는다.

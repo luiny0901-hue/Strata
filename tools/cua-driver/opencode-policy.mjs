@@ -12,6 +12,7 @@ const inputTools = new Set([
 ]);
 
 export function prepareCall(name, args) {
+  if (inputTools.has(name)) return { ...args, delivery_mode: "background" };
   // Reproduce the selected client image budget without overwriting driver-wide settings.
   if (name === "get_window_state" && args.include_screenshot !== false
       && args.max_image_dimension === undefined && args.max_dimension === undefined) {
@@ -44,8 +45,7 @@ export function isSafeCall(name, args) {
   if (name === "move_cursor") return exactWindow(args);
   if (inputTools.has(name)) {
     const supportedDelivery = args.delivery_mode === undefined
-      || args.delivery_mode === "background"
-      || args.delivery_mode === "foreground";
+      || args.delivery_mode === "background";
     return supportedDelivery && exactWindow(args);
   }
   if (name === "set_agent_cursor_enabled") {
@@ -53,4 +53,20 @@ export function isSafeCall(name, args) {
   }
   if (name === "launch_app") return true;
   return true;
+}
+
+// Driver descriptions advertise SendInput escalation; that route is forbidden here.
+export function restrictCatalog(tools) {
+  return tools.map((tool) => {
+    if (!inputTools.has(tool.name)) return tool;
+    const copy = structuredClone(tool);
+    copy.description = `${tool.name}: use CUA Driver background delivery for one exact window only. Prefer a current element_token when supported; otherwise use coordinates from the latest window screenshot. Never use foreground/global input or the user's mouse. If background delivery is unavailable or ineffective, stop and report BACKGROUND_ONLY_UNSUPPORTED; do not retry through shell or native input.`;
+    const delivery = copy.inputSchema?.properties?.delivery_mode;
+    if (delivery) {
+      delivery.enum = ["background"];
+      delivery.default = "background";
+      delivery.description = "Only background delivery is permitted. Foreground SendInput and the user's pointer are forbidden.";
+    }
+    return copy;
+  });
 }

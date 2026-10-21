@@ -26,9 +26,7 @@ window_target(args) if {
   not args.target.kind == "desktop"
 }
 
-window_delivery(args) if { not args.delivery_mode }
 window_delivery(args) if { args.delivery_mode == "background" }
-window_delivery(args) if { args.delivery_mode == "foreground" }
 
 allow if { input.tool in read_tools }
 

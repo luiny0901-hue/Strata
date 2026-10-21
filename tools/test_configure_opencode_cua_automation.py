@@ -86,7 +86,7 @@ class CuaInstallerTests(unittest.TestCase):
         )
         self.korean.write_text(OLD_GUI_RULES, encoding="utf-8")
 
-    def test_installs_foreground_escalation_and_preserves_other_settings(self):
+    def test_installs_background_only_and_preserves_other_settings(self):
         self._seed_config()
         wrapper = self.cua_dir / "opencode-mcp.mjs"
         policy = self.cua_dir / "opencode-background-only.rego"

@@ -8,8 +8,11 @@ test("allows background actions for one exact window", () => {
   assert.equal(isSafeCall("click", { ...target, delivery_mode: "background" }), true);
 });
 
-test("allows foreground escalation for one exact window", () => {
-  assert.equal(isSafeCall("hotkey", { ...target, keys: ["ctrl", "alt", "s"], delivery_mode: "foreground" }), true);
+test("rejects foreground for every input tool even with exact tokens or targets", () => {
+  for (const name of ["click", "double_click", "right_click", "drag", "scroll", "type_text", "press_key", "hotkey", "set_value"]) {
+    assert.equal(isSafeCall(name, { ...target, delivery_mode: "foreground" }), false);
+    assert.equal(isSafeCall(name, { element_token: "s00000001:1", delivery_mode: "foreground" }), false);
+  }
 });
 
 test("allows the driver's default delivery mode for one exact window", () => {
@@ -31,6 +34,19 @@ test("does not expose process termination", () => {
 });
 
 import { prepareCall } from "./opencode-policy.mjs";
+import { restrictCatalog } from "./opencode-policy.mjs";
+
+test("omitted delivery is pinned to background before forwarding", () => {
+  assert.equal(prepareCall("click", target).delivery_mode, "background");
+});
+
+test("catalog removes driver escalation instructions and foreground enum", () => {
+  const original = {name: "click", description: "retry foreground", inputSchema: {properties: {delivery_mode: {enum: ["background", "foreground"]}}}};
+  const [safe] = restrictCatalog([original]);
+  assert.deepEqual(safe.inputSchema.properties.delivery_mode.enum, ["background"]);
+  assert.ok(safe.description.includes("BACKGROUND_ONLY_UNSUPPORTED"));
+  assert.equal(original.description, "retry foreground");
+});
 test("1920 image budget preserves explicit requests and tree-only reads", () => {
   assert.equal(prepareCall("get_window_state", {pid: 1, window_id: 2}).max_image_dimension, 1920);
   assert.equal(prepareCall("get_window_state", {max_image_dimension: 0}).max_image_dimension, 0);
