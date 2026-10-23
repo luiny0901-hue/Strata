@@ -12,7 +12,13 @@
 
 `run`은 설치 질문·서버 상태 조회를 반복하지 않고 저장된 wrapper를 실행합니다. `run -- --version`처럼 OpenCode 인자를 전달할 수 있습니다. 설정이 없으면 setup 안내를 표시합니다. 서버가 꺼져 있으면 서버 PC에서 먼저 실행하세요. 원격 GPU 추론과 로컬 CUA/REA는 서로 다른 실행 위치입니다.
 
+통합 setup은 최신 한국어 진행·완료 보고 지침과 조건부 창작 보조 지침을 설치합니다. Rider ACP 실행에는 생각 알림만 숨기는 표시 래퍼를 적용하고 일반 답변·도구 결과·승인·오류·완료 응답은 전달합니다. 터미널의 일반 OpenCode 실행에는 이 표시 필터를 적용하지 않습니다. 기존 설치를 갱신하려면 메뉴 1번을 다시 실행하고 Rider 연결을 다시 시작하세요. 필요한 OS 권한 승인은 직접 해야 합니다. 실제 새 Windows/Mac 설치 및 Rider 화면 검증은 미실행입니다.
+
 ## 필요한 것
+
+루트 설치 진입점의 `setup`은 이제 누락된 선행 프로그램도 준비합니다.
+[새 PC 자동 준비](../../docs/AUTOMATIC_SETUP_KO.md)를 먼저 참고하세요.
+아래 목록은 설치 후 필요한 구성입니다. 자동 설치 경로는 오프라인 검사만 통과했으며 실제 새 PC 설치는 미검증입니다.
 
 - Python 3.10+ 및 Node.js
 - OpenCode CLI가 설치되어 PATH에서 실행 가능
@@ -76,7 +82,7 @@ sh tools/remote_agent_client/setup-macos.sh doctor
 | OpenCode 오버레이의 `mcp.servers.cua-driver` | 창 단위 정책을 적용하는 Node 중계기 |
 | `~/.jetbrains/acp.json` | 기존 agent를 보존하고 추가한 OpenCode Strata ACP 항목 |
 
-기존 OpenCode 전역 `opencode.json`과 `opencode.jsonc`는 수정하지 않습니다. OpenCode의 `OPENCODE_CONFIG` 사용자 설정 오버레이는 전역·프로젝트 설정과 병합되며, 생성 overlay에는 OpenCode V2의 portable agent profile, Strata provider, 서버가 보고한 모델 ID가 들어갑니다. 프로젝트별 `opencode.json(c)`가 같은 키를 정의하면 그 설정이 우선할 수 있습니다. [V2 설정 위치와 병합](https://dev.opencode.ai/v2/docs/config/), [V2 provider](https://opencode.ai/v2/docs/providers/), [V2 파일 변수](https://dev.opencode.ai/v2/docs/config/)
+Strata 연결 설정은 별도의 오버레이에 저장합니다. REA 등록을 선택하면 공식 REA setup이 기존 전역 `opencode.json`을 백업하고 REA 항목을 추가합니다. OpenCode의 `OPENCODE_CONFIG` 사용자 설정 오버레이는 전역·프로젝트 설정과 병합되며, 생성 overlay에는 OpenCode V2의 portable agent profile, Strata provider, 서버가 보고한 모델 ID가 들어갑니다. 프로젝트별 `opencode.json(c)`가 같은 키를 정의하면 그 설정이 우선할 수 있습니다. [V2 설정 위치와 병합](https://dev.opencode.ai/v2/docs/config/), [V2 provider](https://opencode.ai/v2/docs/providers/), [V2 파일 변수](https://dev.opencode.ai/v2/docs/config/)
 
 기존 `acp.json`이 있으면 백업을 만든 뒤 다른 agent 항목을 보존합니다. 같은 이름이 이미 사용 중이면 새 항목에 `(2)` 같은 이름을 붙입니다. 기존 ACP 파일을 JSON으로 읽을 수 없으면 덮어쓰지 않고 중단합니다.
 
@@ -106,3 +112,11 @@ sh tools/remote_agent_client/setup-macos.sh doctor
 ## 통합 개선 (2026-10-19)
 
 [빠른 시작](../../docs/OPENCODE_QUICKSTART_KO.md)을 기준으로 설치하세요. 현재 설치기는 기본 200단계(사용자 지정 예산 보존), 자동 압축, 한국어 지침과 제한 시간 실행기를 함께 설치합니다. revision 6부터 플러그인·ACP 보조 파일은 해시별 버전 경로를 사용하고, revision 7부터 단계 예산을 갱신합니다. CUA는 background만 허용하며 foreground 재시도와 GUI 앱 자동 실행은 차단합니다. Mac 실제 동작과 Rider/Hermes 검증은 이번 작업에서 수행하지 않았습니다.
+
+장기 프로젝트에서 단계 제한이 부족하면 `tools/configure_opencode_session_recovery.py --config <사용하는 OpenCode 설정 JSON 경로> --build-steps 512`로 유한 예산을 명시할 수 있습니다. 현재 PC의 기본 OpenCode 설정은 `--config` 없이 적용합니다. 외부 클라이언트 오버레이는 `~/.config/opencode/strata-client/opencode.jsonc`이며 설치기가 만든 JSON 파일에만 이 명령을 사용합니다(임의 JSONC 주석이 있는 파일은 지원하지 않음). 기존 모델·MCP 연결을 보존하며 다음 OpenCode/ACP 프로세스부터 적용됩니다. 한도 증가는 작업 완료를 보증하지 않으며 취소·무진전 중단·실패 보고 규칙은 유지합니다.
+
+코딩을 기본으로 유지하면서 창작 원고도 다루려면 같은 명령에 `--task-guidance`를 추가합니다. 짧은 조건부 지침과 원고 압축 보존 규칙만 활성화하며 별도 분류 에이전트나 지침 로딩 도구는 추가하지 않습니다. 적용 방식과 실패/검증 범위는 [작업 유형 지침](../../docs/TASK_POLICY_20261023_KO.md)을 참고하세요.
+
+
+## 설정 갱신 (revision 8)
+최신 ZIP을 모두 풀고 START-AGENT 메뉴 1번으로 갱신합니다. MCP 첫 요청 준비 제한(15초, 이후 요청에서 반복하지 않음)과 CUA 채팅 승인 중계기를 함께 설치합니다. doctor는 이전 설치 revision도 알려 줍니다. Rider의 작업 전체 승인은 ACP 실행 경계 안에서만 유지되며 일반 OpenCode 직접 연결은 동작 1회 승인입니다. 기존 키나 사용자별 실행 경로를 배포 ZIP에 포함하지 않습니다.

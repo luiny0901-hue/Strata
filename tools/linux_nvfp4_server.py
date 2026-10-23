@@ -6,13 +6,17 @@ import json
 import os
 from pathlib import Path
 import secrets
+import stat
 import sys
 import tempfile
 
-from iq4xs_opencode_setup import FORK_RELATIVE, PROFILE_STEM, SHARD_NAMES
+if __package__:
+    from .iq4xs_opencode_setup import FORK_RELATIVE, PROFILE_STEM, SHARD_NAMES
+else:
+    from iq4xs_opencode_setup import FORK_RELATIVE, PROFILE_STEM, SHARD_NAMES
 
 
-def main() -> int:
+def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("prepare", "run"))
     parser.add_argument("--mode", choices=("on", "off"), default="on")
@@ -22,7 +26,7 @@ def main() -> int:
     parser.add_argument("--gpu", type=int, default=0)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8080)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if not sys.platform.startswith("linux"):
         parser.error("This entry point requires Linux. Use the BAT launchers on Windows.")
     if args.gpu < 0 or not 1 <= args.port <= 65535:
@@ -35,13 +39,15 @@ def main() -> int:
     model = data / "models/unsloth-UD-IQ4_XS"
     config_home = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
     private = config_home / "strata"
+    if private.is_symlink():
+        parser.error("Strata config directory must not be a symlink")
     private.mkdir(parents=True, exist_ok=True, mode=0o700)
     key_path = private / "STRATA_API_KEY"
     if not key_path.exists():
         # Exclusive create preserves a key already used by remote clients.
-        with key_path.open("x", opener=lambda p, flags: os.open(p, flags, 0o600)) as stream:
+        with open(key_path, "x", encoding="utf-8", opener=lambda p, flags: os.open(p, flags, 0o600)) as stream:
             stream.write(secrets.token_hex(32))
-    if key_path.is_symlink() or key_path.stat().st_uid != os.getuid():
+    if key_path.is_symlink() or not stat.S_ISREG(key_path.stat().st_mode) or key_path.stat().st_uid != os.getuid():
         parser.error("API key must be a regular file owned by the current user")
     os.chmod(key_path, 0o600)
     key = key_path.read_text(encoding="utf-8")
@@ -113,4 +119,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except (OSError, ValueError) as exc:
+        print(f"Server setup stopped: {exc}. Existing artifacts were preserved.", file=sys.stderr)
+        raise SystemExit(2)

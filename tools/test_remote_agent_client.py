@@ -12,6 +12,21 @@ from tools.remote_agent_client import setup_client as client
 
 
 class RemoteClientTests(unittest.TestCase):
+    def test_unchanged_asset_is_not_rewritten_or_backed_up(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'runtime.js'
+            client.atomic_write(path,b'content')
+            before=path.stat().st_mtime_ns
+            with patch.object(client.tempfile,'mkstemp',side_effect=AssertionError('unchanged file must not be rewritten')):
+                client.atomic_write(path,b'content')
+            self.assertEqual(path.stat().st_mtime_ns,before)
+            self.assertEqual(list(Path(directory).glob('*.backup-*')),[])
+            client.atomic_write(path,b'changed')
+            self.assertEqual(path.read_bytes(),b'changed')
+            backups=list(Path(directory).glob('*.backup-*'))
+            self.assertEqual(len(backups),1)
+            self.assertEqual(backups[0].read_bytes(),b'content')
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.home = Path(self.temp.name) / "사용자 with spaces"
@@ -43,6 +58,12 @@ class RemoteClientTests(unittest.TestCase):
         self.assertEqual(config["providers"]["strata"]["models"]["server"]["modelID"], "actual-server-id")
         self.assertEqual(config["providers"]["strata"]["models"]["server"]["limit"]["output"], 32000)
         state = json.loads(client.state_path(self.home).read_text(encoding="utf-8"))
+        self.assertEqual(state["setup_revision"], client.SETUP_REVISION)
+        guard=next(p for p in config['plugins'] if isinstance(p,dict) and 'strata-acp-foreground-guard' in p['package'])
+        self.assertEqual(guard['options']['mcpStartupBarrierMs'],15000)
+        self.assertTrue((client.client_dir(self.home)/'cua-driver/opencode-task-approval.mjs').is_file())
+        bridge=(client.client_dir(self.home)/'scripts/acp_compact_display.py').read_text(encoding='utf-8')
+        self.assertIn('session/request_permission',bridge)
         self.assertEqual(state["rea_setup_status"], "configured")
         self.assertEqual(state["rea_package"], "rea-agents@6.7.0")
         server = config["mcp"]["servers"]["cua-driver"]
@@ -51,6 +72,7 @@ class RemoteClientTests(unittest.TestCase):
         self.assertEqual(server["environment"]["CUA_DRIVER_PERMISSION_MODE"], "standard")
         self.assertTrue(Path(server["command"][1]).is_file())
         self.assertTrue((client.client_dir(self.home) / "cua-driver/opencode-catalog.mjs").is_file())
+        self.assertTrue((client.client_dir(self.home) / "cua-driver/opencode-request-lifecycle.mjs").is_file())
         for package_name in ('strata-acp-foreground-guard', 'strata-output-recovery'):
             roots = [Path(p['package'] if isinstance(p,dict) else p) for p in config['plugins']]
             target = next(p for p in roots if p.parent == client.client_dir(self.home) / package_name / 'versions')
@@ -71,6 +93,35 @@ class RemoteClientTests(unittest.TestCase):
         self.assertTrue((client.client_dir(self.home) / "scripts/run_bounded_command.sh").is_file())
         self.assertNotIn(b"\r", (client.client_dir(self.home) / "scripts/run_bounded_command.sh").read_bytes())
         self.assertEqual(len(config['plugins']), 2)
+
+    def test_general_quality_rules_install_without_engine_template_or_cua(self):
+        self.install(False)
+        installed=client.client_dir(self.home)/'KOREAN_INSTRUCTIONS.md'
+        text=installed.read_text(encoding='utf-8')
+        self.assertEqual(text,client.INSTRUCTIONS_FILE.read_text(encoding='utf-8'))
+        for term in ('템플릿 설치 여부와 관계없이','데스크톱·웹·모바일 앱',
+                     '다른 엔진·자체 엔진·엔진 없는 게임','저장/불러오기','오류/취소/복구',
+                     '최신 공식 플랫폼 지침','2D·픽셀 아트','3D·실사 기법을 강제하지 않는다',
+                     '관련 없는 UI·아트·아키텍처 전체 재작업',
+                     '대형 게임·소프트웨어 회사의 출시 제품을 참고한','확인 가능한 수락 조건',
+                     '프로토타입·설계 전용·짧은 수정','요청하지 않은 계정·결제·온라인 서비스',
+                     'AAA/출시 수준이라고 보증하지 않는다','게임 규칙/밸런스·사운드/피드백',
+                     '사용자 데이터 보존·호환성'):
+            self.assertIn(term,text)
+        self.assertFalse((self.home/'AGENTS.md').exists())
+
+    def test_delivery_type_policy_is_installed_and_survives_recovery_instructions(self):
+        self.install(False)
+        basic=(client.client_dir(self.home)/'KOREAN_INSTRUCTIONS.md').read_text(encoding='utf-8')
+        for term in ('설치형 데스크톱을 우선','웹사이트로 대체하지 않는다',
+                     '웹·브라우저·CLI·모바일을 명시','기존 프로젝트가 그 형태이면 이를 유지',
+                     '필요한 선택만 한 번 확인','웹 같은 디자인','브라우저 제품 지정이 아니다',
+                     '개발 서버와 브라우저 미리보기만으로 완료하지 않는다',
+                     '네이티브를 요구하면 임의 대체하지 않는다','인용·부정·가정'):
+            self.assertIn(term,basic)
+        recovery=(client.client_dir(self.home)/'STRATA_SESSION_RECOVERY_KO.md').read_text(encoding='utf-8')
+        self.assertIn('산출물 형태·대상 OS·실행/설치 방식',recovery)
+        self.assertIn('웹 전환 허가가 아니다',recovery)
 
     def test_run_uses_existing_wrapper_and_preserves_arguments_and_exit(self):
         self.install(False)
@@ -128,6 +179,21 @@ class RemoteClientTests(unittest.TestCase):
         self.assertEqual(config["compaction"]["buffer"], 2048)
         self.assertEqual(config["compaction"]["keep"]["tokens"], 1024)
         self.assertEqual(config["providers"]["strata"]["models"]["server"]["capabilities"]["input"], ["text"])
+
+    def test_unreported_or_invalid_context_is_not_guessed_or_written(self):
+        for value in (None, True, 0, 2048, "262144", 8192.0):
+            with self.subTest(value=value), self.assertRaisesRegex(client.SetupError, "max_context"):
+                client.build_overlay("http://127.0.0.1:8080/v1", self.model, {"max_context": value}, self.home)
+        self.assertFalse(client.overlay_path(self.home).exists())
+
+    def test_context_sizes_keep_output_and_compaction_within_server_limit(self):
+        for size in (4096, 8192, 32768, 65536, 131072, 262144):
+            with self.subTest(size=size):
+                config = client.build_overlay("http://127.0.0.1:8080/v1", self.model, {"max_context":size}, self.home)
+                limit = config['providers']['strata']['models']['server']['limit']
+                self.assertEqual(limit['context'],size)
+                self.assertLess(limit['output'],size)
+                self.assertLess(config['compaction']['keep']['tokens'],size - config['compaction']['buffer'])
 
     def test_doctor_detects_missing_or_modified_installed_policy_assets(self):
         self.install()

@@ -56,7 +56,8 @@
     "model": "@MODEL_ROOT@\\Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf",
     "gpu": false,
     "max_tokens": 300,
-    "threads": 32
+    "threads": 32,
+    "source_cache": true
   },
   "uncensored": false,
   "sampling": {
@@ -66,5 +67,6 @@
   },
   "anthropic_thinking": "on_request",
   "reasoning_budget_tokens": 8192,
-  "reasoning_close_retry": true
+  "reasoning_close_retry": true,
+  "effort_position": "end"
 }

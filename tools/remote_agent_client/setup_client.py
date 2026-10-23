@@ -34,6 +34,8 @@ from tools.configure_opencode_session_recovery import configure_policy, DEFAULT_
 from tools.opencode_runtime_assets import ACP_ENV, prepare_runtime_assets, prepare_terminal_assets
 from tools.remote_agent_client.rea_integration import ReaSetupError, configure_opencode as configure_rea_opencode, doctor_opencode as doctor_rea_opencode, verify_tool_scope as verify_rea_scope, opencode_config_path as rea_config_path, REA_PACKAGE
 
+from tools.remote_agent_client.portable_profile import export_profile, apply_profile
+
 EXAMPLE_DIR = REPO_ROOT / "examples" / "opencode"
 PROFILE_FILE = EXAMPLE_DIR / "autonomous-agent-v2.fragment.json"
 INSTRUCTIONS_FILE = EXAMPLE_DIR / "KOREAN_INSTRUCTIONS.md"
@@ -42,6 +44,7 @@ MODEL_KEY = "server"
 KEY_FILE_RELATIVE = ".config/opencode/strata-client/secrets/STRATA_API_KEY"
 SCHEMA_URL = "https://opencode.ai/config.json"
 CUA_SERVER_ID = "cua-driver"
+SETUP_REVISION = 9
 CUA_WINDOWS_INSTALLER = "https://cua.ai/driver/install.ps1"
 CUA_MACOS_INSTALLER = "https://cua.ai/driver/install.sh"
 
@@ -166,9 +169,9 @@ def build_overlay(
     config["shell"] = ("pwsh" if shutil.which("pwsh") else "powershell") if os.name == "nt" else "/bin/bash"
 
     context = health.get("max_context")
-    limit: dict[str, int] = {}
-    if isinstance(context, int) and not isinstance(context, bool) and context > 0:
-        limit["context"] = context
+    if isinstance(context, bool) or not isinstance(context, int) or context < 4096:
+        raise SetupError("서버의 max_context는 4096 이상 정수여야 합니다. 컨텍스트 크기를 추정하지 않고 설정을 중단했습니다.")
+    limit: dict[str, int] = {"context": context}
     modalities = ["text"]
     if health.get("images") is True:
         modalities.append("image")
@@ -184,7 +187,7 @@ def build_overlay(
     if limit:
         limit["output"] = min(32000, max(1, context // 4))
         model_config["limit"] = limit
-    configure_policy(config, context if limit else 262144)
+    configure_policy(config, context)
 
     providers = config.setdefault("providers", {})
     if not isinstance(providers, dict):
@@ -228,6 +231,13 @@ def backup_if_changed(path: Path, new_bytes: bytes) -> None:
 
 def atomic_write(path: Path, data: bytes, mode: int = 0o600) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if not path.is_symlink() and path.is_file() and path.read_bytes() == data:
+            if os.name != "nt" and stat.S_IMODE(path.stat().st_mode) != mode:
+                os.chmod(path, mode)
+            return
+    except OSError as exc:
+        raise SetupError(f"기존 파일 확인에 실패해 변경을 중단했습니다: {path}: {exc}") from None
     backup_if_changed(path, data)
     fd, temporary = tempfile.mkstemp(prefix="." + path.name + ".", suffix=".tmp", dir=path.parent)
     try:
@@ -514,6 +524,7 @@ def opencode_version(executable: Path) -> str:
 def build_launcher(home: Path, opencode: Path) -> tuple[Path, str, list[str], bytes, int]:
     bin_dir = client_dir(home) / "bin"
     overlay = overlay_path(home).resolve()
+    display = client_dir(home) / "scripts" / "acp_compact_display.py"
     if os.name == "nt":
         wrapper = bin_dir / "opencode-strata.ps1"
         powershell = shutil.which("powershell.exe") or shutil.which("powershell")
@@ -526,7 +537,9 @@ def build_launcher(home: Path, opencode: Path) -> tuple[Path, str, list[str], by
             "$ErrorActionPreference = 'Stop'\n"
             f"$env:OPENCODE_CONFIG = {_powershell_literal(str(overlay))}\n"
             f"$opencode = {_powershell_literal(str(opencode))}\n"
-            "& $opencode @args\n"
+            "if ($args.Count -gt 0 -and $args[0] -eq 'acp') {\n"
+            f"    & {_powershell_literal(sys.executable)} {_powershell_literal(str(display))} -- $opencode @args\n"
+            "} else { & $opencode @args }\n"
             "exit $LASTEXITCODE\n"
         )
         # Windows PowerShell 5.1 requires a BOM to reliably read non-ASCII paths.
@@ -538,7 +551,11 @@ def build_launcher(home: Path, opencode: Path) -> tuple[Path, str, list[str], by
     content = (
         "#!/bin/sh\n"
         "set -eu\n"
+        'export PATH="$HOME/.local/bin:/opt/homebrew/opt/node@24/bin:/opt/homebrew/opt/python@3.12/libexec/bin:/opt/homebrew/bin:$PATH"\n'
         f"export OPENCODE_CONFIG={_shell_literal(str(overlay))}\n"
+        'if [ "${1:-}" = acp ]; then\n'
+        f"  exec {_shell_literal(sys.executable)} {_shell_literal(str(display))} -- {_shell_literal(str(opencode))} \"$@\"\n"
+        'fi\n'
         f"exec {_shell_literal(str(opencode))} \"$@\"\n"
     )
     return wrapper, str(wrapper), ["acp"], content.encode("utf-8"), 0o700
@@ -621,10 +638,32 @@ def write_setup(
     # Validate existing ACP before writing any local client configuration.
     load_acp(acp)
     config = build_overlay(base_url, model, health, home)
+    portable = REPO_ROOT / 'portable-profile.json'
+    portable_text = None
+    if portable.is_file():
+        try:
+            portable_text = apply_profile(config, json.loads(portable.read_text(encoding='utf-8-sig')))
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise SetupError(f'설정 백업을 읽을 수 없습니다: {exc}') from exc
+        print('현재 PC에서 내보낸 작업·추론·도구 설정을 복원합니다. 서버 주소·키·실행 경로는 이 PC 설정을 사용합니다.')
     recovery_dest = client_dir(home) / "STRATA_SESSION_RECOVERY_KO.md"
-    config["instructions"].append(_tilde_path(recovery_dest, home))
+    if not portable_text:
+        config["instructions"].append(_tilde_path(recovery_dest, home))
     files = {recovery_dest: RECOVERY_SOURCE.read_bytes()}
+    if portable_text:
+        portable_dest = client_dir(home) / 'PORTABLE_INSTRUCTIONS.md'
+        files[portable_dest] = portable_text.encode('utf-8')
+        config['instructions'] = [_tilde_path(portable_dest,home)]
     files.update(prepare_runtime_assets(config, client_dir(home)))
+    for index, entry in enumerate(config.get("plugins", [])):
+        package = entry.get("package", "") if isinstance(entry, dict) else entry
+        if "strata-acp-foreground-guard" in str(package):
+            entry.setdefault("options", {})["mcpStartupBarrierMs"] = 15000
+        if "strata-output-recovery" in str(package):
+            if isinstance(entry, str):
+                entry = {"package": entry, "options": {}}
+                config["plugins"][index] = entry
+            entry.setdefault("options", {})["taskGuidance"] = True
     if cua_driver is not None:
         try:
             _, cua_files = prepare_configuration(
@@ -636,6 +675,11 @@ def write_setup(
         files.update(cua_files)
         config = json.loads(files[overlay_path(home).resolve()])
 
+    if portable_text:
+        config['instructions']=[ref for ref in config['instructions'] if ref.endswith('PORTABLE_INSTRUCTIONS.md') or not any(
+            path.name=='OPENCODE_CUA_AUTOMATION_KO.md' and _tilde_path(path,home)==ref and data.decode('utf-8') in portable_text
+            for path,data in files.items())]
+
     # Validate all generated state before touching the credential or ACP file.
     instructions_dest = client_dir(home) / "KOREAN_INSTRUCTIONS.md"
     instructions_bytes = INSTRUCTIONS_FILE.read_bytes()
@@ -645,6 +689,7 @@ def write_setup(
     # Render/read all assets before writing credentials or publishing the ACP entry.
     files[instructions_dest] = instructions_bytes
     files.update(prepare_terminal_assets(client_dir(home)))
+    files[client_dir(home) / "scripts" / "acp_compact_display.py"] = (REPO_ROOT / "tools/opencode/acp_compact_display.py").read_bytes()
     runner_instructions = client_dir(home) / "TERMINAL_KO.md"
     config["instructions"].append(_tilde_path(runner_instructions, home))
     scripts = client_dir(home) / "scripts"
@@ -684,7 +729,7 @@ def write_setup(
         "rea_setup_status": rea_status,
         "rea_client": "opencode",
         "rea_package": "rea-agents@6.7.0",
-        "setup_revision": 7,
+        "setup_revision": SETUP_REVISION,
         "asset_sha256": {str(path): hashlib.sha256(data).hexdigest() for path, data in files.items()},
     }
     atomic_write(state_path(home), (json.dumps(state, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
@@ -692,6 +737,9 @@ def write_setup(
 
 
 def do_setup(args: argparse.Namespace) -> int:
+    print("\n[연결 설정] 모델을 실행하는 서버 PC를 먼저 켜 두세요.")
+    print("같은 PC에서 사용: 주소 입력에서 Enter. 다른 PC: 서버 소유자가 알려 준 주소와 연결 키를 입력하세요.")
+    print("집 밖에서는 양쪽 PC의 Tailscale 연결이 먼저 필요합니다. 이 단계에서 모델을 내려받지는 않습니다.")
     home = Path(args.home).expanduser() if args.home else Path.home()
     opencode = locate_opencode(args.opencode)
     if opencode is None:
@@ -720,6 +768,8 @@ def do_setup(args: argparse.Namespace) -> int:
         except OSError as exc:
             raise SetupError(f"저장된 API 키를 읽을 수 없습니다: {existing_key}: {exc}") from None
     if not key:
+        print("연결 키는 서버 PC의 .config/strata/STRATA_API_KEY 파일 내용입니다.")
+        print("외부 PC 사용자는 서버 소유자에게 전달받으세요. 입력 중 글자가 보이지 않아도 정상입니다.")
         key = getpass.getpass("Strata API 키 (입력 내용은 화면에 표시되지 않음): ").strip()
     try:
         health, models = fetch_server_profile(base_url, key)
@@ -828,6 +878,10 @@ def do_doctor(args: argparse.Namespace) -> int:
         raise SetupError("클라이언트 영수증과 OpenCode overlay의 최상위 값은 JSON 객체여야 합니다.")
 
     failures = 0
+    revision = state.get("setup_revision")
+    if not isinstance(revision, int) or revision < SETUP_REVISION:
+        print("FAIL 설치 설정이 이전 버전입니다. 최신 압축을 풀고 START-AGENT 메뉴 1번으로 갱신하세요. 서버 주소와 키는 유지해 사용할 수 있습니다.")
+        failures += 1
     asset_errors = check_assets(state)
     for error in asset_errors:
         print(f"FAIL {error}")
@@ -1001,9 +1055,37 @@ def do_run(args: argparse.Namespace) -> int:
         raise SetupError('OpenCode 실행기를 시작하지 못했습니다. 같은 진입점에 doctor를 전달하세요.') from None
 
 
+def do_export_profile(args):
+    home=Path(args.home).expanduser() if args.home else Path.home()
+    source=Path(args.config) if args.config else (overlay_path(home) if overlay_path(home).is_file() else home/'.config/opencode/opencode.json')
+    try:
+        config=json.loads(source.read_text(encoding='utf-8-sig'))
+        effort=None
+        database=home/'.local/share/opencode/opencode.db'
+        if database.is_file():
+            import sqlite3
+            with sqlite3.connect(database.as_uri()+'?mode=ro',uri=True) as connection:
+                rows=connection.execute("select model from session_v2 where idle_outcome='succeeded' order by time_updated desc limit 20")
+                for row in rows:
+                    model=json.loads(row[0] or '{}')
+                    if model.get('providerID')=='strata':effort=model.get('variant');break
+        profile=export_profile(config,home,effort)
+        destination=Path(args.output) if args.output else REPO_ROOT/'portable-profile.json'
+        atomic_write(destination,(json.dumps(profile,ensure_ascii=False,indent=2)+'\n').encode('utf-8'))
+    except (OSError,ValueError) as exc:raise SetupError(f'설정 내보내기 실패: {exc}') from exc
+    print(f'설정 백업 완료: {destination}')
+    print('이 파일을 최신 설치 폴더에 함께 넣고 다른 PC에서 메뉴 1번을 선택하세요. API 키·PC 경로·채팅 본문은 내보내지 않습니다. 지침 내용은 포함되므로 개인 백업으로 보관하세요.')
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
+    export = sub.add_parser('export-profile', help='현재 작업 설정을 다른 PC용으로 내보내기')
+    export.add_argument('--home', help=argparse.SUPPRESS)
+    export.add_argument('--config', help='내보낼 OpenCode 설정 파일 (기본: 설치된 클라이언트 설정)')
+    export.add_argument('--output', help='설정 백업 출력 경로')
+    export.set_defaults(run=do_export_profile)
     setup = sub.add_parser("setup", help="대화형 OpenCode + Rider 설정")
     setup.add_argument("--home", help=argparse.SUPPRESS)
     setup.add_argument("--opencode", help="OpenCode CLI 전체 경로")
