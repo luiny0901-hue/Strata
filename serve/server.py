@@ -2249,6 +2249,7 @@ class Vision:
         self.stopped = True
         self.lock = threading.Lock()
         self.cache: dict[str, tuple[Path, int]] = {}
+        self.source_cache = {} if cfg.get("source_cache") is True else None
         # opt-in (the vision section's "elastic": true, with the config's "vram_elastic"): the encoder starts with the
         # first picture and stops after elastic_idle_s without one; while it runs, the engine's expert cache keeps
         # elastic_mib of VRAM free for it (Service._vision_up / _vision_idle_down)
@@ -2420,11 +2421,27 @@ class Vision:
     def encode(self, source: str | bytes, keep=()) -> tuple[Path, int]:
         """-> (embeddings file, number of image tokens).  `source`: what load() reads, or the image's bytes.
         `keep`: files the caller still needs (never evicted by this call)."""
-        data = self.normalize(source if isinstance(source, bytes) else self.load(source))
+        aliases = getattr(self, "source_cache", None)
+        raw = source if isinstance(source, bytes) else self.load(source)
+        raw_key = hashlib.sha256(raw).hexdigest() if aliases is not None else None
+        if aliases is not None:
+            with self.lock:
+                cached_key = aliases.get(raw_key)
+                if cached_key in self.cache:
+                    self.cache[cached_key] = self.cache.pop(cached_key)
+                    return self.cache[cached_key]
+        data = self.normalize(raw)
         key = hashlib.sha256(data).hexdigest()[:32]
         with self.lock:
+            def remember_source():
+                if aliases is not None:
+                    aliases.pop(raw_key, None)
+                    aliases[raw_key] = key
+                    while len(aliases) > 64:
+                        aliases.pop(next(iter(aliases)))
             if key in self.cache:
                 self.cache[key] = self.cache.pop(key)                  # most recently used last
+                remember_source()
                 return self.cache[key]
             img, out = self.dir / f"{key}.img", self.dir / f"{key}.sve"
             img.write_bytes(data)
@@ -2442,6 +2459,7 @@ class Vision:
                 raise ValueError("the image could not be read: " + (line[4:] if line.startswith("ERR") else
                                                                      "the vision encoder stopped"))
             self.cache[key] = (out, int(line.split()[1]))
+            remember_source()
             held = {str(p) for p in keep} | {str(out)}
             for old in list(self.cache):                               # oldest first, but never one still in use
                 if len(self.cache) <= 64:
