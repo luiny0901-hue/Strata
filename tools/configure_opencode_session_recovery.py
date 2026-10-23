@@ -15,9 +15,9 @@ from pathlib import Path
 from typing import Any
 
 if __package__:
-    from .opencode_runtime_assets import prepare_terminal_assets
+    from .opencode_runtime_assets import prepare_terminal_assets,prepare_runtime_assets
 else:
-    from opencode_runtime_assets import prepare_terminal_assets
+    from opencode_runtime_assets import prepare_terminal_assets,prepare_runtime_assets
 
 DEFAULT_CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "opencode" / "opencode.json"
 DEFAULT_SOURCE = Path(__file__).resolve().parents[1] / "examples" / "opencode" / "STRATA_SESSION_RECOVERY_KO.md"
@@ -126,8 +126,10 @@ def configured_model_context(config: dict[str, Any]) -> int:
     return context
 
 
-def configure_policy(updated: dict[str, Any], context: int = DEFAULT_CONTEXT) -> None:
+def configure_policy(updated: dict[str, Any], context: int = DEFAULT_CONTEXT, *, build_steps: int | None = None) -> None:
     """Shared opt-in policy; reserve scales down for the selected model."""
+    if build_steps is not None and (isinstance(build_steps,bool) or not isinstance(build_steps,int) or not 1<=build_steps<=10000):
+        raise ValueError('build_steps must be an integer from 1 to 10000; no files were changed.')
     policy = compaction_policy(context)
     compaction = _mapping(updated, "compaction", "compaction")
     keep = _mapping(compaction, "keep", "compaction.keep")
@@ -143,6 +145,8 @@ def configure_policy(updated: dict[str, Any], context: int = DEFAULT_CONTEXT) ->
         raise ValueError("agents.build.steps must be a positive integer; no files were changed.")
     elif current_steps == 60:
         build["steps"] = 200
+    if build_steps is not None:
+        build['steps']=build_steps
     policies = _rules(updated, "policies", "policies")
     for policy in UAC_DENY_POLICIES:
         if policy not in policies:
@@ -153,10 +157,37 @@ def configure_policy(updated: dict[str, Any], context: int = DEFAULT_CONTEXT) ->
     permissions.append(copy.deepcopy(FULL_ACCESS_PERMISSION))
 
 
+def configure_mcp_deadlines(updated: dict[str, Any]) -> None:
+    """Opt-in finite execution limits; preserve explicit client/server limits."""
+    mcp = updated.get('mcp', {})
+    if not isinstance(mcp, dict):
+        raise ValueError('mcp must be an object; no files were changed.')
+    shared = mcp.get('timeout', {})
+    if not isinstance(shared, dict):
+        raise ValueError('mcp.timeout must be an object; no files were changed.')
+    servers = mcp.get('servers', mcp)
+    if not isinstance(servers, dict):
+        raise ValueError('mcp.servers must be an object; no files were changed.')
+    for name, milliseconds in (('cua-driver', 180000), ('rea', 1800000)):
+        server = servers.get(name)
+        if server is None:
+            continue
+        if not isinstance(server, dict):
+            raise ValueError(f'MCP server {name} must be an object; no files were changed.')
+        timeout = server.get('timeout', {})
+        if not isinstance(timeout, dict):
+            raise ValueError(f'MCP server {name}.timeout must be an object; no files were changed.')
+        if 'execution' not in timeout and 'execution' not in shared:
+            server['timeout'] = {**timeout, 'execution': milliseconds}
+
+
 def apply_config(
     config_path: Path,
     source_instructions: Path = DEFAULT_SOURCE,
     instructions_dir: Path | None = None,
+    *, build_steps: int | None = None,
+    task_guidance: bool = False,
+    bounded_mcp_timeouts: bool = False,
 ) -> dict[str, Any]:
     config_path = config_path.expanduser()
     source_instructions = source_instructions.expanduser()
@@ -183,7 +214,9 @@ def apply_config(
 
     updated = copy.deepcopy(config)
     context = configured_model_context(updated)
-    configure_policy(updated, context)
+    configure_policy(updated, context, build_steps=build_steps)
+    if bounded_mcp_timeouts:
+        configure_mcp_deadlines(updated)
     instructions = updated.get("instructions", [])
     if isinstance(instructions, str):
         instructions = [instructions]
@@ -193,6 +226,14 @@ def apply_config(
     install_dir = instructions_dir.expanduser() if instructions_dir else config_path.parent
     target = install_dir / INSTALLED_INSTRUCTIONS_NAME
     terminal_files = prepare_terminal_assets(install_dir)
+    runtime_files = {}
+    if task_guidance:
+        runtime_files=prepare_runtime_assets(updated,config_path.parent,names=('output',))
+        for index,entry in enumerate(updated['plugins']):
+            package=entry.get('package') if isinstance(entry,dict) else entry
+            if package and Path(package).parent==config_path.parent/'strata-output-recovery/versions':
+                updated['plugins'][index]={**(entry if isinstance(entry,dict) else {}),'package':package,
+                    'options':{**(entry.get('options',{}) if isinstance(entry,dict) else {}),'taskGuidance':True}}
     reference = _reference_for(target)
     if reference not in instructions:
         instructions.append(reference)
@@ -212,6 +253,8 @@ def apply_config(
     config_backup = _backup(config_path) if config_changed and existed else None
     instruction_backup = _backup(target) if instruction_changed and instruction_exists else None
     terminal_changed = []
+    for path,data in runtime_files.items():
+        if not path.exists():_atomic_write(path,data.decode('utf-8'))
     for path, data in terminal_files.items():
         if path.exists() and path.read_bytes() == data:
             continue
@@ -245,9 +288,12 @@ def main() -> int:
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG, help="OpenCode config path")
     parser.add_argument("--instructions-dir", type=Path, help="directory for the installed instruction file")
     parser.add_argument("--source-instructions", type=Path, default=DEFAULT_SOURCE, help="source Korean instructions")
+    parser.add_argument('--build-steps',type=int,help='Explicit finite build budget; e.g. 512 for long projects. Omit to preserve existing settings.')
+    parser.add_argument('--task-guidance',action='store_true',help='Opt in a compact conditional prose policy; coding remains the default and no classifier/tool call is added')
+    parser.add_argument('--bounded-mcp-timeouts',action='store_true',help='Opt in finite CUA (3 min) and REA (30 min) execution limits where no explicit limit exists')
     args = parser.parse_args()
     try:
-        result = apply_config(args.config, args.source_instructions, args.instructions_dir)
+        result = apply_config(args.config, args.source_instructions, args.instructions_dir,build_steps=args.build_steps,task_guidance=args.task_guidance,bounded_mcp_timeouts=args.bounded_mcp_timeouts)
     except ValueError as error:
         parser.error(str(error))
     print(f"Config: {result['config_path']}")

@@ -69,3 +69,19 @@ const permanent={attempt:2,decision:{retry:false}};
 hooks.get('retry')(permanent);
 assert.equal(permanent.decision.retry,false);
 console.log('PASS: transient retries bounded without overriding permanent errors or Retry-After');
+
+{
+  const event={system:[],tools:{shell:{input:{properties:{background:{},timeout:{}}}}}};
+  hooks.get('context')(event);
+  const first=JSON.stringify(event);
+  for(let i=0;i<10;i++) hooks.get('context')(event);
+  assert.equal(JSON.stringify(event),first);
+  hooks.get('compaction')(event);
+  const compacted=JSON.stringify(event);
+  hooks.get('compaction')(event);
+  assert.equal(JSON.stringify(event),compacted);
+  const full={system:[{type:'text',text:'<!-- strata-summary-full:v1 --> consolidated summary'}]};
+  hooks.get('compaction')(full);
+  assert.equal(full.system.length,1);
+}
+console.log('PASS: reused ACP context and either compaction hook order do not duplicate guidance');

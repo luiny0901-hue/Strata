@@ -9,6 +9,8 @@ import threading
 import time
 import sqlite3
 import hashlib
+import select
+import socket
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
@@ -20,15 +22,39 @@ def main():
     parser.add_argument('--late-resume', action='store_true')
     parser.add_argument('--cancel', action='store_true')
     parser.add_argument('--cancel-stream', action='store_true')
+    parser.add_argument('--cancel-stream-ready', action='store_true', help='Cancel after first visible stream text, keeping the early-cancel scenario separate')
     parser.add_argument('--subagent', action='store_true')
     parser.add_argument('--disconnect', action='store_true')
     parser.add_argument('--fault', choices=['network-once', 'network-down', 'authentication', 'tool-error', 'timeout', 'invalid-json', 'uac', 'powershell-error', 'interactive', 'long-command'])
     parser.add_argument('--auto-compact', action='store_true')
     parser.add_argument('--context', type=int, default=100000)
+    parser.add_argument('--compaction-trigger',type=int)
+    parser.add_argument('--compaction-keep',type=int)
+    parser.add_argument('--usage-tokens',type=int)
+    parser.add_argument('--expect-no-compaction',action='store_true')
     parser.add_argument('--reconnect', action='store_true')
     parser.add_argument('--many-files', action='store_true', help='Add 2048 nested unrelated files and verify they are preserved')
     parser.add_argument('--fresh-session', action='store_true', help='Read and edit pre-existing files from a new DB without chat history')
+    parser.add_argument('--step-limit',type=int)
+    parser.add_argument('--required-tool-steps',type=int,help='Scripted sequential writes in one ACP turn; no real model')
+    parser.add_argument('--expect-step-stop',action='store_true')
+    parser.add_argument('--task-policy',action='store_true',help='Exercise opt-in compact creative policy with the installed ACP runtime')
     args = parser.parse_args()
+    if args.required_tool_steps is not None:
+        if not 1<=args.required_tool_steps<=600 or args.step_limit is None or not 1<=args.step_limit<=1000:
+            parser.error('step experiment requires steps 1..600 and limit 1..1000')
+        if any((args.fresh_session,args.cancel,args.fault,args.auto_compact,args.subagent,args.disconnect,args.output_recovery)):
+            parser.error('step experiment cannot combine other scenarios')
+    elif args.step_limit is not None or args.expect_step_stop:
+        parser.error('step options require --required-tool-steps')
+    if any(v is not None for v in (args.compaction_trigger,args.compaction_keep,args.usage_tokens)) or args.expect_no_compaction:
+        if not args.auto_compact:parser.error('compaction experiment options require --auto-compact')
+    if args.compaction_trigger is not None and not 1024<=args.compaction_trigger<args.context:
+        parser.error('compaction trigger must be 1024..context-1')
+    if args.compaction_keep is not None and not 0<=args.compaction_keep<(args.compaction_trigger or args.context*3//4):
+        parser.error('retained tokens must be smaller than the trigger')
+    if args.cancel_stream_ready:
+        args.cancel_stream = True
     if args.cancel_stream:
         args.cancel = True
         args.output_recovery = True
@@ -42,11 +68,16 @@ def main():
             file.write_text(f'UNRELATED_{index}\n' * 16, encoding='utf-8')
             unrelated[file] = hashlib.sha256(file.read_bytes()).hexdigest()
     requests = []
+    compaction_requests = []
     if args.fresh_session:
         (root/'existing.txt').write_text('BEFORE_HISTORY_FREE',encoding='utf-8')
         (root/'unrelated.txt').write_text('KEEP_EXISTING_WORK',encoding='utf-8')
     events = []
     rpc_timings = []
+    latency_events = []
+    latency_origin = time.perf_counter()
+    def trace(kind, **fields):
+        latency_events.append({'seconds':time.perf_counter()-latency_origin,'kind':kind,**fields})
     marker = root / 'must-not-exist.txt'
     plugin = Path(__file__).resolve().parents[1] / 'examples/opencode/acp-foreground-guard'
     signal = root / 'wake.signal'
@@ -63,10 +94,13 @@ def main():
             pass
 
         def do_POST(self):
+            trace('model.request.headers')
             body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+            trace('model.request.parsed')
             last = body.get('messages', [{}])[-1]
             content = last.get('content', '')
             compaction = args.auto_compact and last.get('role') == 'user' and isinstance(content, str) and content.startswith(('You MUST summarize', 'Update the existing checkpoint', 'The previous response did not fill'))
+            if compaction:compaction_requests.append(body)
             if body.get('tools') and not compaction:
                 requests.append(body)
             n = len(requests) if body.get('tools') and not compaction else 0
@@ -82,7 +116,14 @@ def main():
                 self.end_headers()
                 self.wfile.write(b'{"error":{"message":"Temporary test outage","type":"server_error"}}')
                 return
-            if n == 0:
+            if args.required_tool_steps and n:
+                if body.get('tool_choice')=='none':
+                    delta={'content':'STEP_BUDGET_STOPPED'}
+                elif n<=args.required_tool_steps:
+                    delta={'tool_calls':[{'index':0,'id':f'step_{n}','type':'function','function':{'name':'write','arguments':json.dumps({'path':str(root/'progress.txt'),'content':str(n)})}}]}
+                else:
+                    delta={'content':'LONG_PROJECT_COMPLETE'}
+            elif n == 0:
                 delta = {'content': 'ACP test'}
                 if args.auto_compact:
                     delta = {'content': '## Objective\nComplete verification.\n\n## Requirements\nPreserve saved files.\n\n## Decisions\nUse small writes.\n\n## Work State\n### Completed\nSaved recovered.txt as BEFORE_COMPACTION.\n### Active\nFinal report.\n### Blocked\nNone.\n\n## Next Move\nReport ACP_FINAL_OK.\n\n## Relevant Files\nrecovered.txt\n\n## Important Context\nDo not repeat completed writes.'}
@@ -157,7 +198,15 @@ def main():
             if args.cancel_stream and n == 1:
                 started.write_text('stream started')
                 try:
+                    if args.cancel_stream_ready:
+                        self.wfile.write(('data: '+json.dumps({'choices':[{'index':0,'delta':{'content':'STREAM_READY'},'finish_reason':None}]})+'\n\n').encode())
+                        self.wfile.flush()
                     for index in range(300):
+                        # A peer FIN can be readable long before a small write
+                        # raises on Windows. Observe EOF, not only send failures.
+                        if select.select([self.connection], [], [], 0)[0] and self.connection.recv(1, socket.MSG_PEEK) == b'':
+                            stream_closed.set()
+                            break
                         function = {'name':'write','arguments':'{"path":"must-not-exist.txt","content":"'} if index==0 else {'arguments':'x'}
                         change={'tool_calls':[{'index':0,'id':'streaming_write','type':'function','function':function}]}
                         packet={'choices':[{'index':0,'delta':change,'finish_reason':None}]}
@@ -173,12 +222,16 @@ def main():
                 finish_reason = 'tool_calls' if n == 1 or (n == 2 and args.cancel) else 'stop'
             if args.fault or args.auto_compact:
                 finish_reason = 'tool_calls' if 'tool_calls' in delta else 'stop'
+            if args.required_tool_steps:finish_reason='tool_calls' if 'tool_calls' in delta else 'stop'
             for change, finish in [(dict(role='assistant', **delta), None), ({}, finish_reason)]:
                 packet = {'id': 'mock', 'object': 'chat.completion.chunk', 'created': 1, 'model': 'test-model', 'choices': [{'index': 0, 'delta': change, 'finish_reason': finish}]}
                 if args.auto_compact and finish:
-                    packet['usage'] = {'prompt_tokens': args.context - 500 if n == 1 else 100, 'completion_tokens': 64, 'total_tokens': args.context - 436 if n == 1 else 164}
+                    used=(args.usage_tokens if args.usage_tokens is not None else args.context-500) if n==1 else 100
+                    packet['usage'] = {'prompt_tokens':used,'completion_tokens':64,'total_tokens':used+64}
                 self.wfile.write(('data: ' + json.dumps(packet) + '\n\n').encode())
             self.wfile.write(b'data: [DONE]\n\n')
+            self.wfile.flush()
+            trace('model.response.sent')
 
     server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -196,17 +249,25 @@ def main():
         recovery = plugin.parent / 'output-recovery'
         settings['plugins'].append({'package': str(recovery), 'options': {'providerID': 'test'}})
     # Exercise the same immutable packaging path used by local/remote installers.
-    from opencode_runtime_assets import prepare_runtime_assets
+    if __package__:
+        from .opencode_runtime_assets import prepare_runtime_assets
+    else:
+        from opencode_runtime_assets import prepare_runtime_assets
     settings['plugins'] = []
-    names = ('acp', 'output') if args.output_recovery or args.fault == 'invalid-json' else ('acp',)
+    names = ('acp', 'output') if args.output_recovery or args.fault == 'invalid-json' or args.task_policy else ('acp',)
     for dest, content in prepare_runtime_assets(settings, config, names=names).items():
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(content)
     if 'output' in names:
-        settings['plugins'][-1] = {'package': settings['plugins'][-1], 'options': {'providerID':'test'}}
+        settings['plugins'][-1] = {'package': settings['plugins'][-1], 'options': {'providerID':'test',**({'taskGuidance':True} if args.task_policy else {})}}
     if args.auto_compact:
         settings['providers']['test']['models']['test-model']['limit'] = {'context': args.context, 'output': 1000}
         settings['compaction'] = {'auto': True, 'buffer': args.context // 4, 'keep': {'tokens': min(12000, args.context // 8)}}
+        if args.compaction_trigger is not None:settings['compaction']['buffer']=args.context-args.compaction_trigger
+        if args.compaction_keep is not None:settings['compaction']['keep']['tokens']=args.compaction_keep
+    if args.required_tool_steps:
+        settings['agents']={'build':{'steps':args.step_limit}}
+        settings['compaction']={'auto':False}
     if args.late_resume or (args.cancel and not args.subagent):
         fixture = root / 'fixture-plugin'
         fixture.mkdir()
@@ -237,11 +298,14 @@ export default {id:'test.late-wake', async setup(ctx){
         env[key] = str(root / folder)
     stderr = (root / 'stderr.log').open('w', encoding='utf-8')
     child = subprocess.Popen([args.binary, 'acp'], cwd=root, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=stderr, text=True, encoding='utf-8')
+    trace('acp.spawned',pid=child.pid)
     inbox = queue.Queue()
     def read():
         for line in child.stdout:
             try:
                 message = json.loads(line)
+                update=message.get('params',{}).get('update',{})
+                trace('acp.receive',method=message.get('method'),id=message.get('id'),update=update.get('sessionUpdate'),status=update.get('status'))
                 events.append(message)
                 inbox.put(message)
             except ValueError:
@@ -252,8 +316,9 @@ export default {id:'test.late-wake', async setup(ctx){
         child.stdin.flush()
     def rpc(number, method, params):
         rpc_started = time.monotonic()
+        trace('acp.rpc.send',method=method,id=number)
         send({'jsonrpc': '2.0', 'id': number, 'method': method, 'params': params})
-        end = time.monotonic() + 120
+        end = time.monotonic() + (300 if args.required_tool_steps else 120)
         while time.monotonic() < end:
             message = inbox.get(timeout=max(0.1, end - time.monotonic()))
             if message.get('method') == 'session/request_permission':
@@ -281,6 +346,23 @@ export default {id:'test.late-wake', async setup(ctx){
         rpc(1, 'initialize', {'protocolVersion': 1, 'clientCapabilities': {}, 'clientInfo': {'name': 'strata-regression', 'version': '1'}})
         session = rpc(2, 'session/new', {'cwd': str(root), 'mcpServers': []})
         prompt = {'sessionId': session['sessionId'], 'prompt': [{'type': 'text', 'text': 'Run the verification and report its result.'}]}
+        if args.required_tool_steps:
+            started_turn=time.perf_counter()
+            result=rpc(3,'session/prompt',prompt)
+            elapsed=time.perf_counter()-started_turn
+            progress=int((root/'progress.txt').read_text())
+            stopped=any(r.get('tool_choice')=='none' for r in requests)
+            text=json.dumps(events)
+            if args.expect_step_stop:
+                assert stopped and progress<args.required_tool_steps,(stopped,progress)
+                assert 'LONG_PROJECT_COMPLETE' not in text
+            else:
+                assert not stopped and progress==args.required_tool_steps,(stopped,progress)
+                assert 'LONG_PROJECT_COMPLETE' in text
+            summary={'limit':args.step_limit,'required':args.required_tool_steps,'saved_steps':progress,'model_requests':len(requests),'budget_stopped':stopped,'seconds':elapsed,'stop_reason':result['stopReason'],'scope':'installed ACP, scripted model, isolated writes; not complex coding quality'}
+            (root/'step-results.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
+            print('PASS: '+json.dumps(summary),flush=True)
+            return
         if args.fresh_session:
             result=rpc(3,'session/prompt',{'sessionId':session['sessionId'],'prompt':[{'type':'text','text':'Read existing.txt and change BEFORE_HISTORY_FREE to AFTER_HISTORY_FREE. Preserve unrelated files. This is a new session without previous chat.'}]})
             assert result['stopReason']=='end_turn',result
@@ -300,6 +382,8 @@ export default {id:'test.late-wake', async setup(ctx){
             worker = threading.Thread(target=pending_prompt, daemon=True)
             worker.start()
             wait_for(started.exists, 'Foreground shell did not start')
+            if args.cancel_stream_ready:
+                wait_for(lambda:'STREAM_READY' in json.dumps(events), 'First visible stream text was not received')
             if args.disconnect:
                 shell_pid = int(started.read_text(encoding='utf-8-sig').strip())
                 child.stdin.close()
@@ -364,8 +448,11 @@ export default {id:'test.late-wake', async setup(ctx){
             assert result['stopReason'] == 'end_turn', result
             assert (root / 'recovered.txt').read_text() == 'BEFORE_COMPACTION'
             compact_events = [e for e in events if 'compaction' in json.dumps(e.get('params', {}).get('update', {}).get('_meta', {}))]
-            assert compact_events, 'No automatic compaction was observed'
-            assert any('auto' in json.dumps(e) and 'completed' in json.dumps(e) for e in compact_events), 'Automatic compaction did not finish'
+            if args.expect_no_compaction:
+                assert not compact_events,'Compacted below the configured trigger'
+            else:
+                assert compact_events, 'No automatic compaction was observed'
+                assert any('auto' in json.dumps(e) and 'completed' in json.dumps(e) for e in compact_events), 'Automatic compaction did not finish'
             modifying.set()
             assert rpc(4, 'session/prompt', {'sessionId': session['sessionId'], 'prompt': [{'type': 'text', 'text': 'Change recovered.txt from BEFORE_COMPACTION to AFTER_COMPACTION_EDIT.'}]})['stopReason'] == 'end_turn'
             assert (root / 'recovered.txt').read_text() == 'AFTER_COMPACTION_EDIT', 'Post-compaction edit was not saved'
@@ -373,7 +460,16 @@ export default {id:'test.late-wake', async setup(ctx){
                 assert file.exists() and hashlib.sha256(file.read_bytes()).hexdigest() == digest, f'Unrelated file changed: {file}'
             if unrelated:
                 print(f'PASS: {len(unrelated)} unrelated nested files preserved across compaction and follow-up edit (scripted model, not navigation quality)')
-            print(f'PASS: simulated {args.context}-token budget triggers auto-compaction; saved work and subsequent edit complete')
+            print(f'PASS: simulated {args.context}-token context, trigger={args.compaction_trigger}, keep={args.compaction_keep}, compacted={not args.expect_no_compaction}; saved work and subsequent edit complete')
+            if args.task_policy:
+                encoded=json.dumps(requests,ensure_ascii=False)
+                policy_source=(plugin.parent/'output-recovery/index.js').read_text(encoding='utf-8')
+                policy_line=next(line for line in policy_source.splitlines() if line.startswith('export const taskInstruction = '))
+                expected_policy=json.loads(policy_line.split(' = ',1)[1].removesuffix(';'))
+                assert expected_policy in encoded,'Compact policy missing from actual model requests'
+                assert 'strata_writing_guidance' not in encoded,'Rejected loader tool was exposed'
+                assert compaction_requests and 'Only for active prose work' in json.dumps(compaction_requests),'Conditional checkpoint policy missing'
+                print('PASS: installed ACP receives compact task policy and conditional compaction guidance without extra loader tool (scripted model)')
             return
         if args.subagent:
             if not args.cancel:
@@ -436,6 +532,8 @@ export default {id:'test.late-wake', async setup(ctx){
         (root / 'events.json').write_text(json.dumps(events, indent=2), encoding='utf-8')
         (root / 'requests.json').write_text(json.dumps(requests, indent=2), encoding='utf-8')
         (root / 'rpc-timings.json').write_text(json.dumps(rpc_timings, indent=2), encoding='utf-8')
+        (root / 'latency-events.json').write_text(json.dumps(latency_events, indent=2), encoding='utf-8')
+        if args.task_policy:(root/'compaction-requests.json').write_text(json.dumps(compaction_requests,ensure_ascii=False,indent=2),encoding='utf-8')
 
 
 if __name__ == '__main__':

@@ -3,10 +3,12 @@ import {AsyncLocalStorage} from 'node:async_hooks';
 import {mkdtemp, writeFile, unlink, rmdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
+import {settleMcp} from './mcp-startup.mjs';
 
 export default {
   id: "strata.acp-foreground-guard",
   async setup(context) {
+    if(context.options?.mcpStartupReceipt) await writeFile(context.options.mcpStartupReceipt,JSON.stringify({stage:'setup',foreground:process.env.OPENCODE_ACP_FOREGROUND_GUARD,turn:process.env.OPENCODE_ACP_TURN_GUARD}));
     if (process.env.OPENCODE_ACP_FOREGROUND_GUARD !== "1") return;
     const shellScope = new AsyncLocalStorage();
     if (process.env.OPENCODE_ACP_TERMINAL_GUARD === '1' && context.shell) await context.shell.hook('create.before', async invocation => {
@@ -26,7 +28,8 @@ export default {
         if (entry.name !== "shell" && entry.name !== "subagent") continue;
         editor.update(entry.id, (tool) => {
           const execute = tool.execute;
-          tool.description += " ACP: all required work must settle inside the active request. Shell background=true is blocked. Subagents are awaited, including when background=true is requested. Never end with unfinished mandatory work or promise a later automatic report.";
+          const note = " ACP: all required work must settle inside the active request. Shell background=true is blocked. Subagents are awaited, including when background=true is requested. Never end with unfinished mandatory work or promise a later automatic report.";
+          if (!tool.description.includes(note)) tool.description += note;
           tool.execute = async (input, context) => {
             // Do not start a queued shell/child after the owning request was stopped.
             context.signal?.throwIfAborted();
@@ -55,10 +58,24 @@ export default {
     });
     // Separate opt-in: an existing process must not acquire a new turn gate on hot reload.
     if (process.env.OPENCODE_ACP_TURN_GUARD !== "1") return;
+    let prepareMcp;
+    if(Number.isInteger(context.options?.mcpStartupBarrierMs)&&context.options.mcpStartupBarrierMs>0) {
+      let expected=[];
+      await context.mcp.transform(editor=>{expected=editor.list().filter(([,config])=>!config.disabled).map(([name])=>name);});
+      let initial;
+      prepareMcp=()=>initial??=(async()=>{
+        try {
+          const result=await settleMcp(context,{expected:()=>expected,timeoutMs:Math.min(context.options.mcpStartupBarrierMs,30000)});
+          if(context.options.mcpStartupReceipt) await writeFile(context.options.mcpStartupReceipt,JSON.stringify(result));
+          console.error('[strata-mcp-startup]',JSON.stringify(result));
+        } catch(error) {console.error('[strata-mcp-startup] unavailable:',error.message);}
+      })();
+    }
     const turns = new Map();
-    await context.session.hook("prompt", event => {
+    await context.session.hook("prompt", async event => {
       if (turns.size >= 512 && !turns.has(event.sessionID)) turns.delete(turns.keys().next().value);
       turns.set(event.sessionID, {armed: true, idle: undefined});
+      await prepareMcp?.();
     });
     await context.session.hook("model.request", async event => {
       if (event.kind !== "primary") return;
@@ -74,7 +91,8 @@ export default {
       }
     });
     await context.session.hook("context", event => {
-      event.system.push({type: "text", text: "ACP 요청이 끝나면 작업을 종료한다. 필수 자식 에이전트 결과와 도구 결과를 현재 요청 안에서 기다리고 완료 조건을 확인한 뒤 최종 답변한다. 백그라운드 완료 알림을 기다린다고 말하며 끝내지 않는다. 새 사용자 요청 없는 자동 재개는 차단된다. 외부에서 명시적으로 요청한 상시 서비스의 실행 상태는 최종 보고에 별도로 표시한다."});
+      const text = "ACP 요청이 끝나면 작업을 종료한다. 필수 자식 에이전트 결과와 도구 결과를 현재 요청 안에서 기다리고 완료 조건을 확인한 뒤 최종 답변한다. 백그라운드 완료 알림을 기다린다고 말하며 끝내지 않는다. 새 사용자 요청 없는 자동 재개는 차단된다. 외부에서 명시적으로 요청한 상시 서비스의 실행 상태는 최종 보고에 별도로 표시한다.";
+      if (!event.system.some(item => item.type === 'text' && item.text === text)) event.system.push({type:'text', text});
       for (const name of ["shell", "subagent"]) {
         const background = event.tools[name]?.input?.properties?.background;
         if (background) { background.enum = [false]; background.default = false; background.description = "ACP requires foreground completion inside this request. Use false."; }
@@ -93,6 +111,7 @@ export default {
       }
     });
     await context.session.hook("compaction", event => {
+      if (event.system.some(item => item.type === 'text' && (item.text.startsWith('<!-- strata-summary-full:v1 -->') || item.text.startsWith('<!-- strata-summary-basic:v1 -->')))) return;
       event.system.push({type: "text", text: "<!-- strata-summary-basic:v1 --> Internal checkpoint: keep required English headings, concise Korean contents, unfinished criteria, changed paths, verified results, blockers and next action. Do not reactivate completed work, call tools or invent verification."});
     });
   },

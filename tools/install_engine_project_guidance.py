@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import shutil
 from pathlib import Path
 
 
@@ -26,12 +25,17 @@ def install_guidance(project: Path, engine: str) -> Path:
     if not template.is_file():
         raise ValueError(f"Engine template is missing: {template}")
     destination = project / "AGENTS.md"
-    if destination.exists():
+    content = template.read_bytes()
+    try:
+        # Exclusive creation also protects a file created by another process
+        # between our initial project inspection and this write.
+        with destination.open("xb") as stream:
+            stream.write(content)
+    except FileExistsError:
         raise FileExistsError(
             f"Refusing to overwrite existing project guidance: {destination}. "
             "Merge the relevant template manually."
-        )
-    shutil.copyfile(template, destination)
+        ) from None
     return destination
 
 

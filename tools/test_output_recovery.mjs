@@ -4,6 +4,28 @@ import {recoverStream} from '../examples/opencode/output-recovery/index.js';
 import plugin from '../examples/opencode/output-recovery/index.js';
 import {intentInstruction} from '../examples/opencode/output-recovery/index.js';
 import {instruction} from '../examples/opencode/output-recovery/index.js';
+import acpPlugin from '../examples/opencode/acp-foreground-guard/index.js';
+
+test('both plugin registration orders keep exactly one consolidated compaction policy', async()=>{
+  const previous={foreground:process.env.OPENCODE_ACP_FOREGROUND_GUARD,turn:process.env.OPENCODE_ACP_TURN_GUARD};
+  process.env.OPENCODE_ACP_FOREGROUND_GUARD='1';process.env.OPENCODE_ACP_TURN_GUARD='1';
+  try {
+    for(const order of [[plugin,acpPlugin],[acpPlugin,plugin]]) {
+      const callbacks=[];
+      const context={tool:{transform:async callback=>callback({list:()=>[],add:()=>{}})},session:{hook:async(name,handler)=>{if(name==='compaction') callbacks.push(handler);}}};
+      for(const item of order) await item.setup(context);
+      const event={system:[{type:'text',text:'third-party directive'}]};
+      for(let pass=0;pass<3;pass++) for(const callback of callbacks) await callback(event);
+      assert.equal(event.system.length,2);
+      assert.equal(event.system.filter(item=>item.text.startsWith('<!-- strata-summary-full:v1 -->')).length,1);
+      assert.equal(event.system[0].text,'third-party directive');
+    }
+  } finally {
+    for(const [key,value] of [['OPENCODE_ACP_FOREGROUND_GUARD',previous.foreground],['OPENCODE_ACP_TURN_GUARD',previous.turn]]) {
+      if(value===undefined) delete process.env[key];else process.env[key]=value;
+    }
+  }
+});
 
 test('coding guidance scales short changes without turning call size into file architecture', async () => {
   const hooks=[];
@@ -62,9 +84,49 @@ test('checkpoint guidance is installed without ACP and remains scoped to configu
   assert.match(text, /replay uncertain side effects/);
   assert.match(text, /canonical design paths/);
   assert.match(text, /Do not invent ownership/);
+  assert.match(text, /delivery type \(desktop\/web\/CLI\/mobile\)/);
+  assert.match(text, /target OS, packaging, native\/offline requirements/);
 });
 
 const packet = (delta, finish_reason = null) => 'data: ' + JSON.stringify({choices: [{index: 0, delta, finish_reason}]}) + '\r\n\r\n';
+
+test('late canonical policies replace only owned fallbacks in a reused context', async()=>{
+  const hooks=[];
+  await plugin.setup({tool:{transform:async()=>{}},session:{hook:async(name,handler)=>hooks.push({name,handler})}});
+  const hook=hooks.find(item=>item.name==='context').handler;
+  const external={type:'text',text:'third-party '+instruction};
+  const event={system:[external],tools:{}};
+  await hook(event);
+  assert.ok(event.system.some(item=>item.text===instruction));
+  event.system.push({type:'text',text:'<!-- strata-intent-policy:v2 --> canonical intent'},
+    {type:'text',text:'<!-- strata-coding-policy:v1 --> canonical coding'});
+  for(let i=0;i<3;i++) await hook(event);
+  assert.equal(event.system.length,3);
+  assert.ok(event.system.includes(external));
+  assert.ok(!event.system.some(item=>item.text===instruction || item.text===intentInstruction));
+});
+
+test('installed canonical coding policy suppresses duplicate guidance and retains write bounds', async()=>{
+  const hooks=[];
+  await plugin.setup({tool:{transform:async()=>{}},session:{hook:async(name,handler)=>hooks.push({name,handler})}});
+  const event={system:[{type:'text',text:'<!-- strata-coding-policy:v1 --> installed coding rules'}],tools:{write:{description:'write',input:{properties:{content:{type:'string'}}}}}};
+  await hooks.find(item=>item.name==='context').handler(event);
+  assert.ok(!event.system.some(item=>item.text===instruction));
+  assert.ok(event.system.some(item=>item.text===intentInstruction));
+  assert.equal(event.tools.write.input.properties.content.maxLength,16000);
+});
+
+test('oversized SSE record without delimiter fails instead of growing the buffer forever', async()=>{
+  const data=new TextEncoder().encode('data: '+ 'x'.repeat(8*1024*1024));
+  const body=new ReadableStream({start(c){c.enqueue(data);c.close();}});
+  await assert.rejects(new Response(recoverStream(body,()=>{throw new Error('no retry');},()=>{})).text(), /SSE record limit/);
+});
+
+test('oversized complete SSE record is rejected before JSON parsing', async()=>{
+  const data=new TextEncoder().encode('data: '+ 'x'.repeat(8*1024*1024)+'\n\n');
+  const body=new ReadableStream({start(c){c.enqueue(data);c.close();}});
+  await assert.rejects(new Response(recoverStream(body,()=>1,()=>{})).text(), /SSE record limit/);
+});
 const tool = {tool_calls: [{index: 0, id: 'original', type: 'function', function: {name: 'write', arguments: '{"content":"한글'}}]};
 async function stream(text, attempt = 1) {
   const bytes = new TextEncoder().encode(text);

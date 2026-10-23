@@ -16,6 +16,30 @@ function capture(g) {
   g.response(g.request('get_window_state',{pid:4,window_id:8}),r);
   return r;
 }
+
+test('large screenshots only decode the PNG header and preserve original image bytes',()=>{
+  const g=new WindowGrounding();const response=result(7680,4320);
+  response.content[0].data+='A'.repeat(4*1024*1024);
+  const originalImage=response.content[0].data;
+  const from=Buffer.from;
+  let decoded=0;
+  try {
+    Buffer.from=function(value,encoding,...rest){
+      if(encoding==='base64') { decoded+=value.length; assert.ok(value.length<=32); }
+      return from.call(Buffer,value,encoding,...rest);
+    };
+    g.response(g.request('get_window_state',{pid:4,window_id:8}),response);
+  } finally { Buffer.from=from; }
+  assert.equal(decoded,32);
+  assert.equal(response.content[0].data,originalImage);
+  assert.ok(response.content.at(-1).text.includes('7680x4320'));
+});
+
+test('malformed image data cannot establish coordinate grounding',()=>{
+  const g=new WindowGrounding();const response=result();response.content[0].data=undefined;
+  g.response(g.request('get_window_state',{pid:4,window_id:8}),response);
+  assert.throws(()=>g.request('click',coords),GroundingError);
+});
 test('valid default window scope is admitted; conflicting identities are rejected',()=>{
   assert.ok(isSafeCall('click',{pid:4,window_id:8,x:10,y:10}));
   assert.equal(isSafeCall('click',{target,pid:5,x:10,y:10}),false);
@@ -83,5 +107,25 @@ test('4K and 8K windows on negative monitor origins map overlay without extra DP
     const move=g.request('move_cursor',coords).args;
     assert.equal(move.x,-width/2);
     assert.equal(move.y,-200+height/2);
+  }
+});
+
+test('overlay and clicks share one image basis across portrait, fractional scales and monitor origins',()=>{
+  for(const [iw,ih,bounds] of [
+    [1280,720,{x:100,y:200,width:1920,height:1080}],
+    [1536,864,{x:-1920,y:0,width:1920,height:1080}],
+    [979,986,{x:1920,y:-300,width:1469,height:1479}],
+    [720,1280,{x:-1080,y:-1920,width:1080,height:1920}],
+  ])for(const [x,y] of [[0,0],[iw/2,ih/2],[iw-1,ih-1]]) {
+    const g=new WindowGrounding({captureTools:new Set(['click'])});const r=result(iw,ih);
+    r.structuredContent.window_bounds=bounds;
+    g.response(g.request('get_window_state',{pid:4,window_id:8}),r);
+    const args={pid:4,window_id:8,x,y};
+    const cursor=g.request('move_cursor',args).args;
+    const click=g.request('click',args).args;
+    assert.equal(cursor.x,bounds.x+click.x*bounds.width/iw);
+    assert.equal(cursor.y,bounds.y+click.y*bounds.height/ih);
+    assert.equal(click.capture_id,'capture-1');
+    assert.equal(click.x,x);assert.equal(click.y,y);
   }
 });

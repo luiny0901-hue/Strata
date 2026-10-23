@@ -25,6 +25,57 @@ SOURCE = DEFAULT_SOURCE
 
 
 class InstallerTests(unittest.TestCase):
+    def test_task_guidance_is_opt_in_and_preserves_plugin_options(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path=Path(temp)/'opencode.json'
+            apply_config(path,SOURCE)
+            self.assertNotIn('plugins',json.loads(path.read_text()))
+            apply_config(path,SOURCE,task_guidance=True)
+            config=json.loads(path.read_text())
+            self.assertEqual(len(config['plugins']),1)
+            self.assertTrue(config['plugins'][0]['options']['taskGuidance'])
+            self.assertTrue((Path(config['plugins'][0]['package'])/'index.js').is_file())
+            before=path.read_bytes();apply_config(path,SOURCE,task_guidance=True)
+            self.assertEqual(path.read_bytes(),before)
+    def test_explicit_long_project_budget_is_opt_in_and_preserved(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path=Path(temp)/'opencode.json'
+            apply_config(path,SOURCE,build_steps=512)
+            self.assertEqual(json.loads(path.read_text())['agents']['build']['steps'],512)
+            apply_config(path,SOURCE)
+            self.assertEqual(json.loads(path.read_text())['agents']['build']['steps'],512)
+            before=path.read_bytes()
+            for invalid in (0,-1,True,10001):
+                with self.assertRaises(ValueError):apply_config(path,SOURCE,build_steps=invalid)
+                self.assertEqual(path.read_bytes(),before)
+
+    def test_long_context_policy_preserves_cache_without_losing_latest_constraints(self):
+        text=SOURCE.read_text(encoding='utf-8')
+        for term in ('전체 토큰 수와 새로 읽는 토큰 수를 구분', '요약 비용·후속 작업 시간',
+                     '설정된 자동 압축을 따른다', '최신 요청·제약·실제 변경은 캐시 유지를 위해 누락하지 않는다',
+                     '단순 키워드 필터로 나머지를 무조건 버리지 않는다'):
+            with self.subTest(term=term):self.assertIn(term,text)
+
+    def test_language_policy_covers_terminology_and_requested_output_exceptions(self):
+        # Instruction-delivery contracts, not a substitute for a live-model evaluation.
+        text = (SOURCE.parent / "KOREAN_INSTRUCTIONS.md").read_text(encoding="utf-8")
+        cases = {
+            "mixed-language novice question": ["질문에 영어 단어가 섞여 있다는 이유로", "이후에는 쉬운 한국어", "별도 도구 호출이나 반복 재작성은 하지 않는다"],
+            "preserve technical units": ["단위·수치·기술적 의미는 바꾸지 않는다", "글자 수와 같지 않으므로"],
+            "normal Korean explanation": ["기본 응답은 한국어", "문맥에 맞는 통용 표현"],
+            "technical vocabulary": ["race condition", "경합 상태", "deadlock", "교착 상태"],
+            "searchable original terms": ["처음 등장하거나 의미가 모호할 때 병기", "영문을 반복하지 않는다"],
+            "ambiguous acronyms": ["PPT·ACP·REA", "임의로 풀어 쓰거나"],
+            "requested English deliverable": ["해당 산출물의 언어는 요청대로"],
+            "literal errors and explanations": ["Permission denied", "원문 인용·명령·오류는 보존"],
+            "explicit localization": ["번역·현지화를 명시적으로 요청하면", "키·자리표시자·이스케이프·서식 지정자·코드 동작은 보존"],
+            "stable identifiers": ["기존 식별자·공개 API·경로", "제품명·파일명·API·약어"],
+        }
+        for name, terms in cases.items():
+            with self.subTest(case=name):
+                for term in terms:
+                    self.assertIn(term, text)
+
     def test_applies_recovery_values_and_preserves_existing_provider_settings(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -172,6 +223,17 @@ class InstallerTests(unittest.TestCase):
             "placeholder·mock·미연결 UI·하드코딩 시연을 완성 구현으로 대신하지 않는다",
         ):
             self.assertIn(term, basic)
+
+    def test_architecture_policy_limits_both_duplication_and_overengineering(self):
+        text=SOURCE.read_text(encoding='utf-8')
+        for term in ('기존 소유 모듈 하나','서로 다른 정책을 강제 공통화하지 않는다',
+                     '공유할 계약','호출부·설정·데이터 호환성','작은 수정 때문에 전체 구조를 재설계',
+                     '반복 조회/N+1','무제한 큐/캐시','태스크/이벤트 구독의 누수','필요한 프로파일링'):
+            self.assertIn(term,text)
+        for term in ('도메인 규칙·입출력 계약·데이터 흐름','동시성/자원 수명',
+                     '부분 실패·중복 요청·취소·재시작','실제 대안과 근거',
+                     '작은 수정마다 별도 설계 보고서'):
+            self.assertIn(term,text)
 
     def test_malformed_config_is_preserved_and_refused(self):
         with tempfile.TemporaryDirectory() as temp:

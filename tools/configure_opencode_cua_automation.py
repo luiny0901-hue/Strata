@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install window-scoped background-only CUA input without the user's pointer."""
+"""Install background CUA plus human-approved, task-scoped foreground input."""
 
 from __future__ import annotations
 
@@ -38,8 +38,11 @@ PREVIOUS_STOP_LINE = (
     "창 정체·결과가 불명확하면 사용하지 않는다. 데스크톱 전체 대상, 전역 입력, 셸/네이티브 입력 우회는 계속 금지하며, "
     "권한 거부나 확인되지 않은 결과에서는 멈춘다."
 )
-NEW_DELIVERY_LINE = '- 입력은 정확한 창 PID/HWND 대상으로 `delivery_mode:"background"`만 사용한다. AI 전용 커서는 cua-driver의 `move_cursor` 오버레이만 사용한다. 사용자 마우스·물리 포인터·foreground·SendInput은 금지한다.'
-NEW_STOP_LINE = '- `background_unavailable` 또는 확인된 무동작이면 `BACKGROUND_ONLY_UNSUPPORTED`로 멈추고 보고한다. 사용자 마우스, 전역 입력, 셸/네이티브 입력으로 전환하지 않는다. 창 정체·결과가 불명확하거나 권한이 거부되면 멈춘다.'
+BACKGROUND_DELIVERY_LINE = '- 입력은 정확한 창 PID/HWND 대상으로 `delivery_mode:"background"`만 사용한다. AI 전용 커서는 cua-driver의 `move_cursor` 오버레이만 사용한다. 사용자 마우스·물리 포인터·foreground·SendInput은 금지한다.'
+BACKGROUND_STOP_LINE = '- `background_unavailable` 또는 확인된 무동작이면 `BACKGROUND_ONLY_UNSUPPORTED`로 멈추고 보고한다. 사용자 마우스, 전역 입력, 셸/네이티브 입력으로 전환하지 않는다. 창 정체·결과가 불명확하거나 권한이 거부되면 멈춘다.'
+SINGLE_ACTION_DELIVERY_LINE = BACKGROUND_DELIVERY_LINE + ' 전경 입력 예외는 approved_foreground_action의 로컬 사용자 승인 동작 1회만 허용한다.'
+NEW_DELIVERY_LINE = BACKGROUND_DELIVERY_LINE + ' 전경 입력 예외는 approved_foreground_action의 로컬 사용자 승인 후 현재 ACP 요청 완료·취소·연결 종료까지 허용한다. 다음 요청에는 승인을 재사용하지 않는다.'
+NEW_STOP_LINE = BACKGROUND_STOP_LINE + ' 백그라운드 무동작 확인 뒤 사용자가 승인하면 approved_foreground_action으로만 진행한다. 승인창은 자동 조작하지 않는다.'
 NEW_IDENTITY_LINE = (
     "- 앱/창 정체성은 작업 시작과 결과 검증 때 확인한다. 동일 창에서 연속 작업 중에는 `list_windows`를 매번 반복하지 않는다. "
     "새 창 출현, 창 닫힘, PID/HWND 오류·불일치가 나타날 때만 목록을 다시 조회한다."
@@ -130,8 +133,8 @@ def _patch_gui_instructions(path: Path) -> bytes | None:
     new_lines = (NEW_DISCOVERY_LINE, NEW_DELIVERY_LINE, NEW_STOP_LINE, NEW_IDENTITY_LINE, NEW_STABILITY_LINE)
     old_matches = [
         [i for i, line in enumerate(lines) if line.rstrip("\r\n").startswith(prefix)
-         or (prefix == OLD_DELIVERY_PREFIX and line.rstrip("\r\n") == PREVIOUS_DELIVERY_LINE)
-         or (prefix == OLD_STOP_PREFIX and line.rstrip("\r\n") == PREVIOUS_STOP_LINE)]
+         or (prefix == OLD_DELIVERY_PREFIX and line.rstrip("\r\n") in (PREVIOUS_DELIVERY_LINE, BACKGROUND_DELIVERY_LINE, SINGLE_ACTION_DELIVERY_LINE))
+         or (prefix == OLD_STOP_PREFIX and line.rstrip("\r\n") in (PREVIOUS_STOP_LINE, BACKGROUND_STOP_LINE))]
         for prefix in old_prefixes
     ]
     new_matches = [
@@ -298,8 +301,11 @@ def prepare_configuration(
     doc_content = doc_source.read_bytes()
     template_contents = {
         wrapper_target: (source_root / "tools" / "cua-driver" / "opencode-mcp.mjs").read_bytes(),
+        cua_dir / "opencode-task-approval.mjs": (source_root / "tools/cua-driver/opencode-task-approval.mjs").read_bytes(),
+        cua_dir / "opencode-foreground.mjs": (source_root / "tools/cua-driver/opencode-foreground.mjs").read_bytes(),
         cua_dir / "opencode-catalog.mjs": (source_root / "tools/cua-driver/opencode-catalog.mjs").read_bytes(),
         cua_dir / "opencode-grounding.mjs": (source_root / "tools/cua-driver/opencode-grounding.mjs").read_bytes(),
+        cua_dir / "opencode-request-lifecycle.mjs": (source_root / "tools/cua-driver/opencode-request-lifecycle.mjs").read_bytes(),
         module_target: (source_root / "tools" / "cua-driver" / "opencode-policy.mjs").read_bytes(),
         policy_target: (source_root / "tools" / "cua-driver" / "opencode-window-scoped.rego").read_bytes(),
         installed_doc: doc_content,

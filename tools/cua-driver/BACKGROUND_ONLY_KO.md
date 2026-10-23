@@ -1,3 +1,9 @@
+최신 ACP 연결은 작업 단위 승인으로 바뀌었습니다. 첫 승인 후 현재 요청 완료·취소·연결 종료까지 재사용합니다. 아래 단일 동작 설명은 이전 방식이며 최신 사용법은 docs/CUA_APPROVED_FOREGROUND_KO.md를 따릅니다.
+
+# 사용자 승인 전경 입력 추가 (2026-10-23)
+
+일반 도구와 기본 Rego는 계속 background 전용입니다. `approved_foreground_action`만 채팅 승인 선택창의 실제 사용자 승인 후 별도 CUA 프로세스로 동작 1회를 실행합니다. 승인 대기는 60초이며 거절·취소·화면 변경 시 입력하지 않습니다. Windows/macOS 클라이언트용이며 Linux는 전경 입력을 차단합니다. 아래 내용의 전경 금지는 일반 입력 도구에 적용됩니다. 후속 Windows Rider 승인·입력 시험과 실패 보정은 docs/RIDER_RECHECK_20261023_KO.md에 기록했습니다. macOS는 미검증입니다.
+
 # 사용자 포인터를 사용하지 않는 OpenCode CUA 입력
 
 2026-10-21부터 OpenCode 프록시는 모든 입력을 `background`로 제한합니다. 드라이버 v0.36.0의 도구 설명에 따르면 `move_cursor`는 실제 마우스를 움직이지 않는 에이전트 오버레이이며, `foreground` 입력은 Windows SetForegroundWindow/SendInput을 사용합니다. 이전 foreground 재시도 허용 정책을 제거했습니다.
@@ -29,3 +35,9 @@
 검증: Node 정책/좌표/카탈로그 20개, Python 설치기 11개, 외부 클라이언트 설정 6개 통과. 설치 MCP를 통한 실제 PNG 크기·창 bounds 확인, 스크린샷 없는 클릭 및 이미지 범위 밖 클릭의 실행 전 거부를 확인했습니다. 전경 입력 9종 차단도 유지됩니다. 실제 사용자 창에는 클릭하지 않았습니다. 첫 클릭 성공률을 측정하는 Rider/Chromium GUI 회귀 실험은 수행하지 않았습니다.
 
 재현: `node --test tools/cua-driver/opencode-grounding.test.mjs tools/cua-driver/opencode-policy.test.mjs tools/cua-driver/opencode-catalog.test.mjs` 및 `python tools/cua-driver/verify-installed-background-only.py --coordinates`.
+# 장시간 연결과 요청 기한
+
+프록시의 드라이버 초기화 기한은 20초, 전달한 요청 기한은 120초다. 동시에 대기하는 요청은 최대 128개다.
+무응답·프로세스 종료에서는 대기 요청에 오류를 반환하고 소유한 MCP 연결을 닫는다.
+OpenCode 연결 종료 뒤 드라이버가 종료하지 않으면 3초 후 해당 자식 프로세스를 종료한다.
+입력 타임아웃은 미실행을 뜻하지 않으므로 자동 재전송하지 않는다. 실제 GUI 동작은 별도 확인이 필요하다.

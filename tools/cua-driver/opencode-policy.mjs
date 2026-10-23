@@ -56,6 +56,23 @@ export function isSafeCall(name, args) {
   return true;
 }
 
+// Native drivers may suggest SendInput when PostMessage cannot be verified.
+// Preserve the actual effect/route; never advertise a forbidden recovery path.
+export function restrictActionResult(name, result) {
+  const meta = result?.structuredContent;
+  if (!inputTools.has(name) || meta?.escalation?.target !== "foreground") return result;
+  const { escalation, ...preserved } = meta;
+  const summary = "BACKGROUND_ESCALATION_BLOCKED: the driver requested foreground fallback, which requires separate human approval through approved_foreground_action. "
+    + "The input may already have occurred; delivery is not completion proof. Inspect a fresh target-window screenshot. "
+    + "If unchanged, request human permission with approved_foreground_action or report BACKGROUND_ONLY_UNSUPPORTED. Do not replay input or use foreground/global/SendInput. "
+    + `Driver effect=${String(meta.effect ?? "unknown")}, route=${String(meta.route ?? "unknown")}.`;
+  return {
+    ...result,
+    content: [...(result.content ?? []).filter(item => item.type !== "text"), { type: "text", text: summary }],
+    structuredContent: { ...preserved, summary, code: "background_escalation_blocked" },
+  };
+}
+
 // Driver descriptions advertise SendInput escalation; that route is forbidden here.
 export function restrictCatalog(tools) {
   return tools.map((tool) => {
@@ -68,7 +85,7 @@ export function restrictCatalog(tools) {
     }
     if (!inputTools.has(tool.name)) return tool;
     const copy = structuredClone(tool);
-    copy.description = `${tool.name}: use CUA Driver background delivery for one exact window only. Prefer a current element_token when supported; otherwise use coordinates from the latest window screenshot. Never use foreground/global input or the user's mouse. If background delivery is unavailable or ineffective, stop this GUI step and report BACKGROUND_ONLY_UNSUPPORTED; do not retry through shell or native input. Continue only independent already-authorized code tasks and report blocked acceptance criteria.`;
+    copy.description = `${tool.name}: use CUA Driver background delivery for one exact window only. Prefer a current element_token when supported; otherwise use coordinates from the latest window screenshot. Never use foreground/global input or the user's mouse. If background delivery is confirmed ineffective, use approved_foreground_action only to obtain HUMAN approval for the current ACP task (or a single action without the task bridge); otherwise report BACKGROUND_ONLY_UNSUPPORTED. Never bypass through shell/native input or automate the confirmation dialog. Continue only independent already-authorized code tasks and report blocked acceptance criteria.`;
     copy.description += " Pixel coordinates are relative to the returned screenshot (not screen, UIA frame, normalized 0..1000, or vision encoder size). Never add window origin or rescale for DPI. After any input, get a new screenshot before another pixel action; token actions need current tokens. Do not retry a guessed coordinate.";
     const delivery = copy.inputSchema?.properties?.delivery_mode;
     if (delivery) {

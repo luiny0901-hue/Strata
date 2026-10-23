@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 import sys
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -14,6 +15,23 @@ from tools.install_engine_project_guidance import TEMPLATES, install_guidance  #
 
 
 class EngineGuidanceTests(unittest.TestCase):
+    def test_quality_criteria_cover_play_visuals_ui_and_measured_performance(self):
+        for engine,template in TEMPLATES.items():
+            with self.subTest(engine=engine):
+                text=template.read_text(encoding='utf-8')
+                for term in ('아트 방향','대상 기기','프레임','메모리','카메라','애니메이션','VFX','HUD','포커스','로딩','복구','라이선스'):
+                    self.assertIn(term,text)
+                self.assertEqual(text.count('## 검증과 보고'),1)
+
+    def test_global_ui_and_game_rules_are_available_to_remote_client_setup(self):
+        from tools.remote_agent_client.setup_client import INSTRUCTIONS_FILE
+        text=INSTRUCTIONS_FILE.read_text(encoding='utf-8')
+        self.assertIn('최신 공식 플랫폼 지침',text)
+        self.assertIn('반응형',text)
+        self.assertIn('접근성',text)
+        self.assertIn('대표 플레이 구간',text)
+        self.assertIn('미완성 범위를 명시',text)
+
     def test_each_template_is_copied_to_a_new_project_root(self):
         for engine, template in TEMPLATES.items():
             with self.subTest(engine=engine), tempfile.TemporaryDirectory() as temporary:
@@ -46,6 +64,16 @@ class EngineGuidanceTests(unittest.TestCase):
             project.mkdir()
             with self.assertRaisesRegex(ValueError, "Unsupported engine"):
                 install_guidance(project, "godot")
+
+    def test_nonoverwrite_does_not_depend_on_a_racy_exists_check(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project=Path(temporary)
+            existing=project/'AGENTS.md'
+            existing.write_text('concurrent user instructions',encoding='utf-8')
+            with patch.object(Path,'exists',return_value=False):
+                with self.assertRaisesRegex(FileExistsError,'Refusing to overwrite'):
+                    install_guidance(project,'unity')
+            self.assertEqual(existing.read_text(encoding='utf-8'),'concurrent user instructions')
 
 
 if __name__ == "__main__":

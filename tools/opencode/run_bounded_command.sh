@@ -80,18 +80,40 @@ cancel_runner() {
 }
 trap 'cancel_runner 130' INT
 trap 'cancel_runner 143' TERM HUP
-next_heartbeat=$heartbeat_seconds
-while kill -0 "$runner_pid" 2>/dev/null; do
-  sleep 1
-  elapsed=$(( $(date +%s) - start_epoch ))
-  if ((elapsed >= next_heartbeat)); then
+# Progress reporting must not delay command completion by a polling interval.
+# The monitor owns its sleep child and stops it when the runner exits/cancels.
+(
+  trap - EXIT INT TERM HUP
+  heartbeat_sleep=
+  stop_monitor() {
+    if [[ -n $heartbeat_sleep ]]; then
+      kill "$heartbeat_sleep" 2>/dev/null || true
+      wait "$heartbeat_sleep" 2>/dev/null || true
+    fi
+    exit 0
+  }
+  trap stop_monitor TERM HUP INT
+  while kill -0 "$runner_pid" 2>/dev/null; do
+    sleep "$heartbeat_seconds" &
+    heartbeat_sleep=$!
+    wait "$heartbeat_sleep" || break
+    heartbeat_sleep=
+    kill -0 "$runner_pid" 2>/dev/null || break
+    elapsed=$(( $(date +%s) - start_epoch ))
     printf '[runner] still running elapsed=%ss pid=%s\n' "$elapsed" "$runner_pid" >&2
-    next_heartbeat=$((next_heartbeat + heartbeat_seconds))
-  fi
-done
+  done
+) &
+heartbeat_pid=$!
+cleanup_monitor() {
+  kill "$heartbeat_pid" 2>/dev/null || true
+  wait "$heartbeat_pid" 2>/dev/null || true
+}
+trap cleanup_monitor EXIT
 
 wait "$runner_pid"
 status=$?
+cleanup_monitor
+trap - EXIT
 elapsed=$(( $(date +%s) - start_epoch ))
 printf '[runner] elapsed=%ss\n' "$elapsed" >&2
 

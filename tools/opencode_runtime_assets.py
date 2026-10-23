@@ -5,6 +5,7 @@ import hashlib
 ROOT = Path(__file__).resolve().parents[1]
 ACP_ENV = {'OPENCODE_ACP_FOREGROUND_GUARD': '1', 'OPENCODE_ACP_TURN_GUARD': '1', 'OPENCODE_ACP_TERMINAL_GUARD': '1'}
 PLUGINS = {'acp': ('acp-foreground-guard', 'strata-acp-foreground-guard'),
+           'restart': ('server-lifecycle', 'strata-server-lifecycle'),
            'output': ('output-recovery', 'strata-output-recovery')}
 
 
@@ -21,6 +22,7 @@ def prepare_runtime_assets(config, directory, names=('acp', 'output')):
         for filename in ('package.json', 'index.js'):
             assets[filename] = (ROOT / 'examples/opencode' / source_name / filename).read_bytes()
         if name == 'acp':
+            assets['mcp-startup.mjs'] = (ROOT / 'examples/opencode/acp-foreground-guard/mcp-startup.mjs').read_bytes()
             for filename in ('powershell-bootstrap.ps1', 'powershell-preflight.ps1'):
                 assets[filename] = (ROOT / 'tools/opencode' / filename).read_bytes()
         digest = hashlib.sha256()

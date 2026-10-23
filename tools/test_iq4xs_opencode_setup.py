@@ -67,6 +67,7 @@ class ProfileTemplateTests(unittest.TestCase):
                 self.assertEqual(profile["port"], 8080)
                 self.assertEqual(profile["gpu"], 1)
                 self.assertEqual(profile["model_name"], MODEL_KEY)
+                self.assertEqual(profile["effort_position"], "end")
                 self.assertEqual(
                     profile["args"][profile["args"].index("--pack") + 1],
                     str(data_root / "packs" / "unsloth-ud-iq4_xs"),

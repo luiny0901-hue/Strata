@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 const actions = new Set(["click", "double_click", "right_click", "drag", "scroll", "type_text", "press_key", "hotkey", "set_value"]);
 const points = new Set(["click", "double_click", "right_click", "drag", "scroll", "move_cursor"]);
 
@@ -18,8 +19,10 @@ function metadata(result) {
 
 function pngSize(result) {
   for (const item of result?.content ?? []) {
-    if (item.type !== "image" || item.mimeType !== "image/png") continue;
-    const bytes = Buffer.from(item.data, "base64");
+    if (item.type !== "image" || item.mimeType !== "image/png" || typeof item.data !== 'string') continue;
+    // PNG dimensions live in the first 24 bytes; avoid decoding a whole 4K/8K
+    // image just to read its header. The original image is still returned intact.
+    const bytes = Buffer.from(item.data.slice(0, 32), "base64");
     if (bytes.length >= 24 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
       return [bytes.readUInt32BE(16), bytes.readUInt32BE(20)];
     }
@@ -56,7 +59,7 @@ export class WindowGrounding {
       this.latestCaptures.set(key, ticket.captureSequence);
     }
     const pairs = name === "drag" ? [[args.from_x, args.from_y], [args.to_x, args.to_y]] : [[args.x, args.y]];
-    const pixel = points.has(name) && !args.element_token && (name === "drag" || name === "move_cursor" || args.x !== undefined || args.y !== undefined);
+    const pixel = (points.has(name) || actions.has(name)) && !args.element_token && (name === "drag" || name === "move_cursor" || args.x !== undefined || args.y !== undefined);
     if (pixel) {
       const frame = this.frames.get(key);
       if (!frame || this.now() - frame.time > this.maxAgeMs) throw new GroundingError("Read get_window_state with include_screenshot:true for this exact window, inspect it, then choose screenshot-local pixels. Do not guess/replay coordinates.");
@@ -105,7 +108,8 @@ export class WindowGrounding {
     }
     this.frames.delete(ticket.key);
     if (this.frames.size >= 32) this.frames.delete(this.frames.keys().next().value);
-    this.frames.set(ticket.key, {width: size[0], height: size[1], bounds: meta.window_bounds, captureID: meta.capture_id, time: this.now()});
+    this.approvalImage = {key: ticket.key, data: result.content.find(item => item.type === "image" && item.mimeType === "image/png").data};
+    this.frames.set(ticket.key, {width: size[0], height: size[1], bounds: meta.window_bounds, captureID: meta.capture_id, time: this.now(), digest: createHash("sha256").update(result.content.find(item => item.type === "image" && item.mimeType === "image/png").data).digest("hex")});
     result.content ??= [];
     result.content.push({type: "text", text: `CUA_COORDINATES: window ${ticket.key}; returned PNG ${size[0]}x${size[1]}. For click/drag/scroll/move_cursor use pixels in THIS image, origin top-left, x=0..${size[0]-1}, y=0..${size[1]-1}. Do not use desktop/UIA-frame coordinates, add window origin, or scale by DPI/vision token budget. Prefer element_token for standard controls. One input consumes this grounding; inspect a new screenshot before the next pixel action. move_cursor is an optional AI overlay, not a prerequisite to click.`});
   }
