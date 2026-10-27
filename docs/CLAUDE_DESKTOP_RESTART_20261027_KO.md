@@ -81,10 +81,12 @@ REA로 설치된 Desktop의 선택된 ASAR 파일을 정적으로 확인했다. 
 
 사용자 위임으로 supervisor 재시작을 에이전트가 수행했다. 분리 실행한 스크립트가 21:45:48 기존 supervisor(18584)를 관리 창 닫기와 같은 정상 종료로 종료 시도, 45초 안에 끝나지 않아 강제 종료로 전환했고, 21:46:39 같은 관리형 ON 실행기가 PID 34288로 다시 시작되어 모델 준비까지 확인했다. 새 프로세스라 상한 제거 코드가 로드된 첫 실동 환경이다. 21:48대 제출한 `-d`가 accepted·queued됐고, 이 대화의 마지막 답변이 저장된 직후 Desktop이 실제로 종료되는 것을 사용자가 확인했다. 고정 창 만료 없이 조용한 첫 순간에 종료가 진행된 것이 실환경에서 확인된 것이다.
 
-다만 21:49:17 supervisor가 수동 재시작으로 교체되면서(PID 49272) 종료 다음 단계인 네이티브 재개가 실행되지 못한 채 거래는 `needs_attention`/`owner_interrupted`로 남았다. 재개 미실행이라 부작용은 없고 영수증이 원인대로 기록됐다. Desktop은 21:49:31 사용자 수동 실행으로 다시 열렸고 이 대화가 이어졌다. 즉 요청한 "조용한 첫 순간에 바로 재시동"은 실동 확인, reopen 단계는 supervisor 교대로 이번에도 미확인이다. reopen은 supervisor가 살아 있어야 수행하는 단계이며, Desktop·supervisor·모델 서버는 각각 별도 프로세스라 Desktop 종료와 서버 재시작은 서로 원인·결과가 아니다.
+다만 21:49:17 supervisor가 교체되면서(PID 49272) 종료 다음 단계인 네이티브 재개가 실행되지 못한 채 거래는 `needs_attention`/`owner_interrupted`로 남았다. 교체 원인은 5차 관찰 이후의 부모 체인 확인으로 정정한다: 21:46에 에이전트가 도구 셸에서 `Start-Process`로 띄운 supervisor는 Desktop Code 자식 트리에 포함돼 있어 Desktop 정상 종료와 함께 연쇄 종료된 것이 시각·트리 관계와 일치한다(후임 49272는 explorer 별도 트리이며 실행 주체는 미확인). 재개 미실행이라 부작용은 없고 영수증이 원인대로 기록됐다. Desktop은 21:49:31 사용자 수동 실행으로 다시 열렸고 이 대화가 이어졌다. 즉 요청한 "조용한 첫 순간에 바로 재시동"은 실동 확인, reopen 단계는 supervisor 교대로 이번에도 미확인이다. reopen은 supervisor가 살아 있어야 수행하는 단계이며, Desktop·supervisor·모델 서버는 각각 별도 프로세스라 Desktop 종료와 서버 재시작은 서로 원인·결과가 아니다.
 
 ## 2026-10-27 5차 인계(-e) 실동 관찰 — 재개 실행이 기록
 
 사람 동작 없이 전체 사슬이 자동 진행됐다. 21:56:44 `-e` 접수(queued) → 원 턴의 `end_turn` 저장 후 조용한 첫 순간에 Desktop 정상 종료(PID 44188 종료 확인) → supervisor 종료·교대 없이 같은 supervisor(PID 49272)가 네이티브 재개를 실행 → 이 재개 실행(체크포인트를 읽은 현재 실행)이 21:57대 `acknowledge_desktop_restart`로 operation_id·nonce·session_id를 수락 전달(`acknowledged: true`, state `continuing`) → 관찰 기록 커밋. 접수부터 재개 실행까지 약 1분, 그중 종료 결정은 대기 상한 없이 조건이 성립한 직후 1초 안정 확인 뒤 이뤄졌다.
 
 재개 실행이 끝나면 소유자가 수락 표시를 확인해 거래를 `ready`로 마감하고 원래 Desktop 대화를 자동으로 다시 연다. 이 문장을 작성하는 시점은 재개 실행 안이므로 `ready` 전환과 실제 재열기 화면은 실행 종료 이후의 일이며, 재열기가 일어나면 같은 대화에서 영수증 최종 상태(`desktop/` 영수증의 state=ready, `handoff_completed: true`)로 확인한다.
+
+**최종 결과**: 원 Desktop 대화가 자동으로 다시 열리는 것을 사용자가 확인했고, 영수증은 `ready`·`acknowledged: true`·`handoff_completed: true`로 마감됐다. 접수→조용한 첫 순간 종료→네이티브 재개 1회→수락→자동 재열기→ready 전 구간이 사람 동작 없이 처음 완주했다. 5차 관찰에서 확인한 프로세스 구조: supervisor와 모델 서버는 explorer에 걸린 별도 트리(Desktop과 독립, Desktop이 끝나도 살아남)이고, 재열기로 열린 Desktop은 오히려 supervisor가 실행한 자식이었다. 반면 21:46에 에이전트가 도구 셸에서 `Start-Process`로 띄운 supervisor(34288)는 Desktop Code의 자식 트리에 있어 Desktop 종료 연쇄와 함께 사라진 것으로 보인다(정확한 종료 원인은 로그에 남지 않아 미확인이나, 시각과 트리 관계가 일치한다). 에이전트가 supervisor를 다시 띄울 때는 분리 실행(예: WMI `Win32_Process.Create`)을 써야 하는 이유이며 유지보수 안내에 규칙으로 기록했다.
