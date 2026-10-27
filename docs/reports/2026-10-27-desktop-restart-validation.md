@@ -2,7 +2,7 @@
 
 목적: 인계 -e(strata-desktop-restart-recheck-20261027-e)로 자동 종료→네이티브 재개→자동 재열기 전체 사슬을 처음부터 끝까지 실동 확인. 사용자 지시: Desktop과 supervisor를 건드리지 않는다.
 
-지금 이 파일을 읽고 있는 재개 실행이 할 일:
+재개 실행 진행 결과(이 실행에서 완료): 영수증 state=continuing 확인, acknowledge 성공(`acknowledged: true`), 관찰 기록을 `docs/CLAUDE_DESKTOP_RESTART_20261027_KO.md`의 5차 항목에 추가하고 커밋. 남은 건 이 실행 종료 후의 확인뿐: 원래 Desktop 대화가 자동으로 다시 열리는지, 영수증이 `ready`/`handoff_completed: true`로 마감되는지. 재개 실행이 할 일 목록(참고용):
 1. 거래 영수증을 읽는다: `C:\Users\luiny\Strata-data\supervisor\desktop\` 안의 파일 중 operation_id가 위와 같은 것(JSON 내용으로 확인). state가 continuing 중인지, 이후 ready까지 진행하는지 확인한다.
 2. strata-maintenance의 acknowledge_desktop_restart에 operation_id=strata-desktop-restart-recheck-20261027-e, nonce=같은 영수증 JSON의 nonce 값, session_id=5ae054a7-5bfe-4178-9633-a1ed79c2dae5를 전달해 수락한다.
 3. 관찰 결과(각 상태 전환이 있었는지, 재열기가 동작했는지, 시간)를 `docs/CLAUDE_DESKTOP_RESTART_20261027_KO.md` 끝의 "5차 인계(-e)" 항목에 한국어로 추가 기록하고 커밋한다(Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>).
