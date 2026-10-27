@@ -25,6 +25,17 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIG_RELATIVE = Path('.config/strata/server-control/desktop-restart.json')
 MAX_JSON = 1024 * 1024
 MAX_TRANSCRIPT_TAIL = 2 * 1024 * 1024
+# An owned session whose transcript stopped moving is interrupted or waiting on a
+# human, not running a model request; it must not block a handoff forever.
+STALE_OTHER_SESSION_SECONDS = 15 * 60
+
+
+class HandoffBlockedError(ValueError):
+    """Timeout cause with a fixed public category, never private text."""
+
+    def __init__(self, code, message):
+        self.handoff_code = code
+        super().__init__(message)
 
 
 def canonical_session(value):
@@ -550,29 +561,39 @@ class DesktopRuntime:
                 continue
             try:
                 cli_id = self._process_session(process)
+                transcript = self._transcript(cli_id)
+                state = dialog_state(tail_events(transcript))
+                age = time.time() - transcript.stat().st_mtime
             except (OSError, ValueError, KeyError):
                 return False
-            if dialog_state(tail_events(self._transcript(cli_id))) != 'idle':
+            if state != 'idle' and age <= STALE_OTHER_SESSION_SECONDS:
                 return False
         return True
 
     def wait_for_handoff(self, binding, cancel_event, deadline):
         deadline = min(deadline, time.monotonic() + 180)
         stable = None
+        blocked = 'original_turn_unfinished'
         while time.monotonic() < deadline:
             if cancel_event.is_set():
                 return
             self._unchanged(binding)
             finished = accepted_then_finished(tail_events(binding['transcript'], offset=binding['transcript_offset']),
                                              binding['operation_id'])
-            if finished and self._other_sessions_idle(binding):
-                stable = stable or time.monotonic()
-                if time.monotonic() - stable >= 1:
-                    return
+            if finished:
+                if self._other_sessions_idle(binding):
+                    stable = stable or time.monotonic()
+                    if time.monotonic() - stable >= 1:
+                        return
+                    blocked = 'other_sessions_busy'
+                else:
+                    stable = None
+                    blocked = 'other_sessions_busy'
             else:
                 stable = None
+                blocked = 'original_turn_unfinished'
             cancel_event.wait(0.25)
-        raise ValueError('Original turn did not finish or another Desktop session is busy; no shutdown was requested')
+        raise HandoffBlockedError(blocked, 'Original turn did not finish or another Desktop session is busy; no shutdown was requested')
 
     def quit(self, binding):
         self._unchanged(binding)

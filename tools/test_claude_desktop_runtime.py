@@ -12,7 +12,8 @@ from unittest.mock import patch
 
 from tools import claude_desktop_runtime as runtime_module
 from tools.claude_desktop_runtime import (
-    DesktopRuntime, StreamSummary, accepted_then_finished, canonical_session, dialog_state,
+    DesktopRuntime, HandoffBlockedError, StreamSummary, accepted_then_finished,
+    canonical_session, dialog_state,
 )
 
 
@@ -408,9 +409,34 @@ class RuntimeFixtureTests(unittest.TestCase):
         self.system.live.add(201)
         self.assertFalse(self.runtime._other_sessions_idle(binding))
         event = ClockEvent()
-        with patch.object(runtime_module.time, "monotonic", side_effect=lambda: event.now), self.assertRaises(ValueError):
+        with patch.object(runtime_module.time, "monotonic", side_effect=lambda: event.now), \
+                self.assertRaises(HandoffBlockedError) as blocked:
             self.runtime.wait_for_handoff(binding, event, event.now + 1.5)
+        self.assertEqual(blocked.exception.handoff_code, "other_sessions_busy")
         self.assertEqual(self.system.actions, [])
+
+    def test_stale_paused_other_session_does_not_block_handoff(self):
+        binding = self.prepare()
+        binding["operation_id"] = OPERATION
+        other = self.transcript.parent / (OTHER_ID + ".jsonl")
+        other.write_text(json.dumps({"type": "user", "message": {"content": "stale-paused-fixture"}}) + "\n", encoding="utf-8")
+        self.system.processes[201] = {"pid": 201, "parent": 100, "exe": str(self.cli),
+                                      "command": f'"{self.cli}" --session-id {OTHER_ID}'}
+        self.system.identities[201] = {"pid": 201, "started": 20100, "sid": self.system.sid, "exe": str(self.cli)}
+        self.system.live.add(201)
+        stale = time.time() - 16 * 60
+        os.utime(other, (stale, stale))
+        self.assertTrue(self.runtime._other_sessions_idle(binding))
+
+    def test_unfinished_original_turn_timeout_reports_fixed_category(self):
+        binding = self.prepare()
+        binding["operation_id"] = OPERATION
+        self.append_events(accepted_result(), thinking_end_turn())
+        event = ClockEvent()
+        with patch.object(runtime_module.time, "monotonic", side_effect=lambda: event.now), \
+                self.assertRaises(HandoffBlockedError) as blocked:
+            self.runtime.wait_for_handoff(binding, event, event.now + 1.5)
+        self.assertEqual(blocked.exception.handoff_code, "original_turn_unfinished")
 
     def test_native_resume_preserves_settings_scrubs_environment_and_returns_only_metadata(self):
         binding = self.prepare()

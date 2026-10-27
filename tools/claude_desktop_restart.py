@@ -330,12 +330,13 @@ class DesktopRestartController:
                 terminal, error = "ready", None
         except _Abort as exc:
             terminal, error = exc.state, exc.code
-        except Exception:
+        except Exception as exc:
             # Runtime errors can contain private paths, text or credentials. Keep
             # a fixed category and leave detailed diagnosis to the runtime owner.
             terminal = "needs_attention" if quit_attempted else "failed"
-            error = {"waiting_for_handoff": "handoff_failed", "quitting": "quit_failed",
-                     "continuing": "continuation_failed"}.get(phase, "handoff_failed")
+            error = getattr(exc, "handoff_code", None) or {
+                "waiting_for_handoff": "handoff_failed", "quitting": "quit_failed",
+                "continuing": "continuation_failed"}.get(phase, "handoff_failed")
         finally:
             if quit_attempted:
                 try:

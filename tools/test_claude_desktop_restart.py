@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from tools.claude_desktop_restart import DesktopRestartController
+from tools.claude_desktop_runtime import HandoffBlockedError
 
 
 def publish(path, value):
@@ -290,6 +291,18 @@ class DesktopRestartTests(unittest.TestCase):
                 status = self.controller.status(operation)
                 self.assertEqual(status["state"], "failed")
                 self.assertFalse(status["handoff_completed"])
+
+    def test_handoff_blocked_category_survives_into_receipt(self):
+        def blocked():
+            raise HandoffBlockedError("other_sessions_busy", "private-text-fixture")
+        self.runtime.after_wait = blocked
+        self.prepare()
+        self.settle()
+        status = self.controller.status("one")
+        self.assertEqual(status["state"], "failed")
+        self.assertEqual(status["error_code"], "other_sessions_busy")
+        self.assertFalse(status["handoff_completed"])
+        self.assertNotIn("private-text-fixture", json.dumps(status))
 
     def test_reopen_failure_is_not_hidden_by_successful_continuation(self):
         self.runtime.reopen_error = True
