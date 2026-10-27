@@ -571,7 +571,6 @@ class DesktopRuntime:
         return True
 
     def wait_for_handoff(self, binding, cancel_event, deadline):
-        deadline = min(deadline, time.monotonic() + 180)
         stable = None
         blocked = 'original_turn_unfinished'
         while time.monotonic() < deadline:

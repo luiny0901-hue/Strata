@@ -438,6 +438,40 @@ class RuntimeFixtureTests(unittest.TestCase):
             self.runtime.wait_for_handoff(binding, event, event.now + 1.5)
         self.assertEqual(blocked.exception.handoff_code, "original_turn_unfinished")
 
+    def test_long_deadline_keeps_waiting_past_the_old_cap(self):
+        binding = self.prepare()
+        binding["operation_id"] = OPERATION
+        self.append_events(accepted_result(), thinking_end_turn())
+        event = ClockEvent()
+        with patch.object(runtime_module.time, "monotonic", side_effect=lambda: event.now), \
+                self.assertRaises(HandoffBlockedError) as blocked:
+            self.runtime.wait_for_handoff(binding, event, event.now + 1000)
+        self.assertGreater(event.now - 10.0, 180)
+        self.assertEqual(blocked.exception.handoff_code, "original_turn_unfinished")
+        self.assertEqual(self.system.actions, [])
+
+    def test_long_deadline_fires_when_the_turn_finishes_after_the_old_cap(self):
+        binding = self.prepare()
+        binding["operation_id"] = OPERATION
+
+        class LateIdle(ClockEvent):
+            appended = False
+
+            def wait(self, duration):
+                cancelled = super().wait(duration)
+                if not self.appended and self.now > 310:
+                    self.appended = True
+                    self.owner.append_events(accepted_result(), text_end_turn())
+                return cancelled
+
+        event = LateIdle()
+        event.owner = self
+        with patch.object(runtime_module.time, "monotonic", side_effect=lambda: event.now):
+            self.runtime.wait_for_handoff(binding, event, event.now + 1000)
+        self.assertTrue(event.appended)
+        self.assertGreater(event.now, 310)
+        self.assertEqual(self.system.actions, [])
+
     def test_native_resume_preserves_settings_scrubs_environment_and_returns_only_metadata(self):
         binding = self.prepare()
         created, process_patch = self.resume_process(binding)
