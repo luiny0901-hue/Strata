@@ -11,9 +11,9 @@ import sys
 import tempfile
 
 if __package__:
-    from .iq4xs_opencode_setup import FORK_RELATIVE, PROFILE_STEM, SHARD_NAMES
+    from .strata_iq4xs_profiles import FORK_RELATIVE, PROFILE_STEM, SHARD_NAMES
 else:
-    from iq4xs_opencode_setup import FORK_RELATIVE, PROFILE_STEM, SHARD_NAMES
+    from strata_iq4xs_profiles import FORK_RELATIVE, PROFILE_STEM, SHARD_NAMES
 
 
 def main(argv=None) -> int:

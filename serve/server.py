@@ -57,7 +57,7 @@ from urllib.parse import parse_qs, urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT))   # run as a script (run-<model>.bat) as well as a module
-from serve.frontend import (THINK_END, ChatTemplate, Event, OutputParser, anthropic_to_messages,  # noqa: E402
+from serve.frontend import (THINK_END, ChatTemplate, Event, OutputParser, anthropic_to_messages, anthropic_tool_cache_prompt,  # noqa: E402
                             forced_call, images_of, literal_tags, mark_think_literals, openai_to_messages,
                             tool_choice_of, unmark_think_literals)
 from serve.mcp import McpCancelled, hub_from_config  # noqa: E402
@@ -65,9 +65,11 @@ from serve import runconfig  # noqa: E402
 from serve import logit_bias as bias_api  # noqa: E402
 from serve.winjob import contain  # noqa: E402
 from serve.structured import StructuredOutputError, prepare_format, validated_json  # noqa: E402
+from serve.anthropic_response_guard import configure_response_guard, guard_anthropic_events  # STRATA_ANTHROPIC_RESPONSE_GUARD_V1
 from serve import responses as responses_api  # noqa: E402
 from serve.responses import ResponsesError, error_body as responses_error_body  # noqa: E402
 from serve import images as images_api  # noqa: E402
+from serve.anthropic_compaction import concise_compaction_request  # noqa: E402
 
 IM_END = "<|im_end|>"
 IMAGE_PAD = "<|image_pad|>"
@@ -210,7 +212,7 @@ def focused_recovery_prompt(tok, ids, generated):
         for i in range(len(head) - len(old) + 1):
             if head[i:i + len(old)] == old:
                 return ids[:i] + new + ids[i + len(old):] + list(generated)
-    # OpenCode and other clients need not include Strata's native effort sentence.
+    # API clients need not include Strata's native effort sentence.
     # Append inside the first system message; if that boundary is malformed, fail closed.
     separator = tok.encode("\n\n", parse_special=False)
     return ids[:len(head)] + separator + new + ids[len(head):] + list(generated)
@@ -3057,6 +3059,8 @@ class Service:
         self.aliases: list[str] = []                  # #297: other names of the model (the config's `aliases`)
         self.reasoning_close_retry = False            # #1053 (opt-in): close the thinking once when a reply ends inside it
         self.codex_compaction_cache = False           # #924 (opt-in): a Codex compaction is rendered with its conversation's tools
+        self.anthropic_compact_summary = False        # opt-in: concise Claude Code recovery state, no hard output cap
+        self.anthropic_tool_cache = False             # opt-in: discovered definitions stay beside ToolSearch results
         self.codex_thread_titles = False              # #923 (opt-in): answer Codex's thread-title turns without the engine
         self.sampling_defaults = dict(sampling_defaults or {})   # the run config's `sampling` block
         self.shared = {}                              # the web app's Chat settings for every client (POST /settings)
@@ -6066,14 +6070,23 @@ def make_handler(svc: Service):
             """Anthropic's token count, which Claude Code asks for its context figures: the prompt this server would
             read for the same request, rendered and tokenized - the model does not run."""
             req = svc.with_shared(req, "anthropic")
+            req = concise_compaction_request(req, svc.anthropic_compact_summary)
             messages, tools, kw = anthropic_to_messages(req, svc.anthropic_think_unasked)
             stop_strings(req)                                 # the same 400 as the request itself would get
             check_request_sampling(req)                       # ... likewise a sampling field of the wrong type
+            if svc.anthropic_tool_cache:
+                if tool_choice_of(req.get('tool_choice'))[0] == 'none':
+                    tools = None
+                messages, tools = anthropic_tool_cache_prompt(req, messages, tools)
             self._json(200, {"input_tokens": len(svc.encode_prompt(messages, tools, kw))})
 
         def _anthropic(self, req):
             svc.load()
             req = svc.with_shared(req, "anthropic")
+            compact_req = concise_compaction_request(req, svc.anthropic_compact_summary)
+            if compact_req is not req:
+                print('[strata] Claude compaction format: concise', flush=True)
+            req = compact_req
             messages, tools, kw = anthropic_to_messages(req, svc.anthropic_think_unasked)
             self._no_local_images(messages)
             if tool_choice_of(req.get("tool_choice"))[0] == "none":   # Anthropic's {"type": "none"}: no tools offered
@@ -6085,9 +6098,14 @@ def make_handler(svc: Service):
             check_request_sampling(req)                       # ... and a sampling field of the wrong type
             cancel = threading.Event()
             self._watch_client(cancel)                       # #430 #431 (#1999: before prepare, which can take long)
-            ids, thinking, max_new = svc.prepare(messages, tools, kw, max_new, force=force, req=req, cancel=cancel)
+            shown = tools
+            if svc.anthropic_tool_cache:
+                messages, shown = anthropic_tool_cache_prompt(req, messages, tools)
+            ids, thinking, max_new = svc.prepare(messages, shown, kw, max_new, force=force, req=req, cancel=cancel)
             _debug_req("anthropic", req, messages, tools, max_new, thinking, len(ids))
             events = anthropic_events(svc, req, ids, thinking, tools, max_new, cancel, force=force)
+            events = guard_anthropic_events(events, req, enabled=getattr(svc, "anthropic_response_guard", False),
+                                            with_tools=bool(tools), cancel=cancel, heartbeat_s=KEEPALIVE_S)  # STRATA_ANTHROPIC_RESPONSE_GUARD_V1
             events = self._capture(events, "anthropic")
             if not req.get("stream"):
                 return self._json(200, anthropic_collect(events))
@@ -6105,6 +6123,10 @@ def make_handler(svc: Service):
                 self._note(outcome="disconnected")
                 cancel.set()
                 events.close()
+            except StructuredOutputError as e:  # STRATA_ANTHROPIC_RESPONSE_GUARD_V1
+                err = {"type": "error", "error": {"type": "api_error", "code": "structured_output_failed", "message": str(e)}}
+                self._note(error=err["error"])
+                self.wfile.write(b"event: error\ndata: " + json.dumps(err).encode() + b"\n\n")
             except EngineDied as e:                          # mid-stream: Anthropic's error event
                 err = {"type": "error", "error": {"type": "api_error", "message": f"{e}; the next request restarts it"}}
                 self._note(error=err["error"])
@@ -6822,6 +6844,8 @@ def main() -> int:
                   "Chat settings shared with other apps, can set its own)", flush=True)
     svc.codex_thread_titles = cfg.get("codex_thread_titles") is True    # #923: opt-in, off by default
     svc.codex_compaction_cache = cfg.get("codex_compaction_cache") is True   # #924: opt-in, off by default
+    svc.anthropic_tool_cache = cfg.get('anthropic_tool_cache') is True
+    svc.anthropic_compact_summary = cfg.get('anthropic_compact_summary') is True
     try:
         svc.set_aliases(cfg.get("aliases"))             # #297: other names the model answers to
     except ValueError as e:
@@ -6889,11 +6913,6 @@ def main() -> int:
     if not isinstance(recovery, bool):
         raise SystemExit(f"[strata] config \"tool_call_recovery\" must be true or false, not {recovery!r}")
     svc.tool_call_recovery = recovery
-    etu = cfg.get("env_to_user", False)                # opt-in: see frontend._env_to_user
-    if not isinstance(etu, bool):
-        raise SystemExit(f"[strata] config \"env_to_user\" must be true or false, not {etu!r}")
-    import serve.frontend as _frontend
-    _frontend.ENV_TO_USER = etu
     rs = cfg.get("repeat_stop_tokens", REPEAT_STOP_TOKENS)   # #606: opt-out with 0
     if isinstance(rs, bool) or not isinstance(rs, int) or rs < 0:
         raise SystemExit(f"[strata] config \"repeat_stop_tokens\" must be a whole number >= 0 (0 = off), not {rs!r}")
@@ -6908,6 +6927,7 @@ def main() -> int:
         if budget:
             print(f"[strata] thinking budget: {budget} tokens (reasoning_budget_tokens; a request can set its own)",
                   flush=True)
+    configure_response_guard(svc, cfg.get("anthropic_response_guard", False))  # STRATA_ANTHROPIC_RESPONSE_GUARD_V1
     recovery = cfg.get("reasoning_loop_recovery", False)   # #728: false (default) | "stop" | "recover" (true)
     if recovery is True:
         recovery = "recover"

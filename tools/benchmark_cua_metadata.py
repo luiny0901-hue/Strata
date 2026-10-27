@@ -7,18 +7,21 @@ import queue
 import subprocess
 import threading
 import time
+if __package__:
+    from .claude_mcp_config import read as read_mcp
+else:
+    from claude_mcp_config import read as read_mcp
 
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args();root=args.output.resolve();root.mkdir(parents=True,exist_ok=False)
-    cfg=json.loads((Path.home()/'.config/opencode/opencode.json').read_text(encoding='utf-8'))
-    server=cfg['mcp']['servers']['cua-driver'];results=[]
-    if server.get('disabled'):raise RuntimeError('Configured CUA disabled')
+    cfg=read_mcp(Path.home()/'.claude/strata-mcp.json')
+    server=cfg['mcpServers']['cua-driver'];results=[]
     for sample in range(3):
         row={'sample':sample+1};start=time.perf_counter();inbox=queue.Queue()
         with (root/f'stderr-{sample+1}.log').open('w',encoding='utf-8') as stderr:
-            child=subprocess.Popen(server['command'],env={**os.environ,**server.get('environment',{})},stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=stderr,text=True,encoding='utf-8')
+            child=subprocess.Popen([server['command'],*server.get('args',[])],env={**os.environ,**server.get('env',{})},stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=stderr,text=True,encoding='utf-8')
             def read(stream):
                 for line in stream:
                     try:inbox.put(json.loads(line))

@@ -16,7 +16,7 @@ from tools.install_engine_project_guidance import TEMPLATES, install_guidance  #
 
 class EngineGuidanceTests(unittest.TestCase):
     def test_quality_criteria_cover_play_visuals_ui_and_measured_performance(self):
-        for engine,template in TEMPLATES.items():
+        for engine,template in ((k,v) for k,v in TEMPLATES.items() if k!="desktop"):
             with self.subTest(engine=engine):
                 text=template.read_text(encoding='utf-8')
                 for term in ('아트 방향','대상 기기','프레임','메모리','카메라','애니메이션','VFX','HUD','포커스','로딩','복구','라이선스'):
@@ -24,8 +24,7 @@ class EngineGuidanceTests(unittest.TestCase):
                 self.assertEqual(text.count('## 검증과 보고'),1)
 
     def test_global_ui_and_game_rules_are_available_to_remote_client_setup(self):
-        from tools.remote_agent_client.setup_client import INSTRUCTIONS_FILE
-        text=INSTRUCTIONS_FILE.read_text(encoding='utf-8')
+        text=(ROOT/'examples/claude/KOREAN_INSTRUCTIONS.md').read_text(encoding='utf-8')
         self.assertIn('최신 공식 플랫폼 지침',text)
         self.assertIn('반응형',text)
         self.assertIn('접근성',text)
@@ -42,6 +41,15 @@ class EngineGuidanceTests(unittest.TestCase):
 
                 self.assertEqual(destination, project / "AGENTS.md")
                 self.assertEqual(destination.read_bytes(), template.read_bytes())
+
+    def test_desktop_profile_and_cli_alias(self):
+        import subprocess,json
+        text=TEMPLATES['desktop'].read_text(encoding='utf-8')
+        self.assertIn('HTML/Canvas/Three.js/브라우저 데모로 대체하지 않는다',text)
+        with tempfile.TemporaryDirectory() as directory:
+            result=subprocess.run([sys.executable,str(ROOT/'tools/install_engine_project_guidance.py'),'--profile','desktop','--project',directory],capture_output=True,timeout=10)
+            self.assertEqual(result.returncode,0)
+            self.assertEqual((Path(directory)/'AGENTS.md').read_bytes(),TEMPLATES['desktop'].read_bytes())
 
     def test_existing_project_guidance_is_never_overwritten(self):
         with tempfile.TemporaryDirectory() as temporary:

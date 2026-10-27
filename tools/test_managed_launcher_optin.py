@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-from tools.configure_strata_server_lifecycle import enable_managed_launchers
+from tools.configure_strata_managed_launchers import enable_managed_launchers
 
 ROOT=Path(__file__).resolve().parents[1]
 

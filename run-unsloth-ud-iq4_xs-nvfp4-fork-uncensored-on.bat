@@ -20,7 +20,7 @@ if "%~1"=="" if not defined STRATA_SUPERVISOR_CHILD if exist "%USERPROFILE%\.con
 )
 
 if /i "%~1"=="--managed" if not defined STRATA_SUPERVISOR_CHILD (
-    "%PYTHON%" "%STRATA_ROOT%tools\strata_server_supervisor.py" --launcher "%~f0" --state-dir "%DATA_ROOT%\supervisor" --api-key-file "%API_KEY_FILE%" --token-file "%USERPROFILE%\.config\strata\server-control\restart-control.key" --console-log
+    "%PYTHON%" "%STRATA_ROOT%tools\strata_server_supervisor.py" --launcher "%~f0" --state-dir "%DATA_ROOT%\supervisor" --api-key-file "%API_KEY_FILE%" --token-file "%USERPROFILE%\.config\strata\server-control\restart-control.key" --console-log --desktop-restart-config "%USERPROFILE%\.config\strata\server-control\desktop-restart.json"
     if errorlevel 1 (
         echo Managed Strata failed. See the error above and %DATA_ROOT%\supervisor\server.log
         pause
@@ -60,8 +60,11 @@ if not exist "%VECTOR%" (echo NVFP4 fork refusal projection is missing.& if not 
 if not exist "%DATA_ROOT%\logs" mkdir "%DATA_ROOT%\logs"
 if errorlevel 1 (echo Could not create the Strata log directory.& if not defined STRATA_SUPERVISOR_CHILD pause& exit /b 17)
 if not exist "%PROFILE_DIR%" mkdir "%PROFILE_DIR%"
-"%PYTHON%" "%STRATA_ROOT%tools\iq4xs_opencode_setup.py" render-profile --mode on --strata-root "%STRATA_ROOT%." --data-root "%DATA_ROOT%" --output "%PROFILE%"
+"%PYTHON%" "%STRATA_ROOT%tools\strata_iq4xs_profiles.py" render-profile --mode on --strata-root "%STRATA_ROOT%." --data-root "%DATA_ROOT%" --output "%PROFILE%"
 if errorlevel 1 (echo Could not render the ON profile.& if not defined STRATA_SUPERVISOR_CHILD pause& exit /b 18)
+
+"%PYTHON%" "%STRATA_ROOT%tools\patch_nvfp4_response_guard.py" "%FORK_ROOT%\serve\server.py"
+if errorlevel 1 (echo Could not prepare Messages response delivery.& if not defined STRATA_SUPERVISOR_CHILD pause& exit /b 27)
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$c=Get-NetTCPConnection -State Listen -LocalPort 8080 -ErrorAction SilentlyContinue; if ($c) { $c | Select-Object LocalAddress,LocalPort,OwningProcess | Format-Table -AutoSize; exit 1 } else { exit 0 }"
 if errorlevel 1 (echo Port 8080 is occupied or could not be checked. No process was stopped.& if not defined STRATA_SUPERVISOR_CHILD pause& exit /b 19)

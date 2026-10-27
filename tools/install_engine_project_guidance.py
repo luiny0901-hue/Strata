@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create a non-overwriting Unreal or Unity AGENTS.md at a project root."""
+"""Create non-overwriting desktop, Unreal or Unity project guidance at a project root."""
 
 from __future__ import annotations
 
@@ -9,13 +9,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = {
-    "unreal": ROOT / "examples" / "opencode" / "game-engines" / "UNREAL_ENGINE_AGENTS.md",
-    "unity": ROOT / "examples" / "opencode" / "game-engines" / "UNITY_AGENTS.md",
+    "desktop": ROOT / "examples" / "claude" / "professional" / "DESKTOP_AGENTS.md",
+    "unreal": ROOT / "examples" / "claude" / "game-engines" / "UNREAL_ENGINE_AGENTS.md",
+    "unity": ROOT / "examples" / "claude" / "game-engines" / "UNITY_AGENTS.md",
 }
 
 
 def install_guidance(project: Path, engine: str) -> Path:
-    """Copy one engine template to a new project-root AGENTS.md without overwriting."""
+    """Copy one project template to a new project-root AGENTS.md without overwriting."""
     if engine not in TEMPLATES:
         raise ValueError(f"Unsupported engine: {engine}")
     project = project.expanduser().resolve()
@@ -41,7 +42,7 @@ def install_guidance(project: Path, engine: str) -> Path:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--engine", required=True, choices=sorted(TEMPLATES), help="game engine template")
+    parser.add_argument("--profile", "--engine", dest="engine", required=True, choices=sorted(TEMPLATES), help="project profile; --engine remains supported")
     parser.add_argument("--project", required=True, type=Path, help="existing project root")
     args = parser.parse_args()
     try:
@@ -49,7 +50,7 @@ def main() -> int:
     except (OSError, ValueError) as error:
         parser.error(str(error))
     print(f"Created {destination}")
-    print("Review engine version and project-specific commands, then commit AGENTS.md with the game project.")
+    print("Review target/version and project commands. Preserve guidance through the project workflow; no commit or push was performed.")
     return 0
 
 

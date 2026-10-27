@@ -124,15 +124,19 @@ class BoundedLog:
 
 class OwnedProcess:
     """Never adopt a PID from disk or search by executable/port to kill it."""
-    def __init__(self, command, log, *, console_log=False):
+    def __init__(self, command, log, *, console_log=False, cwd=None, environment=None):
         self.command, self.log, self.child, self.job = command, log, None, None
         self.console_log = console_log
         self.output_thread, self.log_error = None, None
+        self.cwd, self.environment = cwd, environment
 
     def start(self):
-        env = dict(os.environ, STRATA_SUPERVISOR_CHILD='1', PYTHONUNBUFFERED='1')
+        env = (dict(self.environment) if self.environment is not None else
+               dict(os.environ, STRATA_SUPERVISOR_CHILD='1', PYTHONUNBUFFERED='1'))
         options = {'stdin': subprocess.DEVNULL, 'stdout': subprocess.PIPE,
                    'stderr': subprocess.STDOUT, 'env': env}
+        if self.cwd is not None:
+            options['cwd'] = self.cwd
         command = self.command
         if os.name == 'nt':
             # A Job Object owns descendants even if the BAT's cmd.exe exits first.
@@ -219,7 +223,7 @@ class OwnedProcess:
     def alive(self):
         return self.child is not None and self.child.poll() is None
 
-    def stop(self):
+    def stop(self, *, grace_seconds=30):
         if self.child is None:
             return
         try:
@@ -229,7 +233,7 @@ class OwnedProcess:
                         self.child.send_signal(signal.CTRL_BREAK_EVENT)
                     else:
                         os.killpg(self.child.pid, signal.SIGTERM)
-                    self.child.wait(timeout=30)
+                    self.child.wait(timeout=grace_seconds)
                 except (OSError, subprocess.TimeoutExpired):
                     pass
             if os.name == 'nt' and self.job:
@@ -459,7 +463,7 @@ class Supervisor:
                     self.transaction_active=False
 
 
-def control_handler(supervisor, token):
+def control_handler(supervisor, token, desktop=None, desktop_error=None):
     def public_receipt(value):
         if value is None:
             return None
@@ -477,6 +481,35 @@ def control_handler(supervisor, token):
                 if not 0 < length <= 68000:
                     raise ValueError('Invalid request size')
                 body = json.loads(self.rfile.read(length))
+                if self.path.startswith('/desktop/'):
+                    if not isinstance(body, dict):
+                        raise ValueError('Desktop request must be an object')
+                    if self.path == '/desktop/capabilities':
+                        result = {'enabled': desktop is not None, 'owner': 'existing_strata_supervisor',
+                                  'recovery': 'one_native_cli_resume_then_original_desktop_session',
+                                  'error_code': desktop_error}
+                    elif desktop is None:
+                        raise ValueError('Desktop restart is not enabled in this supervisor; configure it and restart the owner')
+                    elif self.path == '/desktop/restart':
+                        result = desktop.prepare(body['operation_id'], body['session_id'],
+                            body['checkpoint_path'], body['caller_pid'],
+                            body.get('continuation_timeout_seconds', 86400))
+                    elif self.path == '/desktop/status':
+                        result = desktop.status(body['operation_id'])
+                    elif self.path == '/desktop/cancel':
+                        result = desktop.cancel(body['operation_id'])
+                    elif self.path == '/desktop/ack':
+                        result = desktop.acknowledge(body['operation_id'], body['nonce'], body['session_id'])
+                    else:
+                        self.send_error(404)
+                        return
+                    data = json.dumps(result).encode()
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Content-Length', str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
                 if (not isinstance(body,dict) or not isinstance(body.get('operation_id'),str)
                         or not 0 < len(body['operation_id']) <= 128):
                     raise ValueError('Invalid operation_id')
@@ -517,6 +550,8 @@ def main():
     parser.add_argument('--server-url', default='http://127.0.0.1:8080')
     parser.add_argument('--control-port', default=8768, type=int)
     parser.add_argument('--console-log', action='store_true', help='Also display child output in the launcher console')
+    parser.add_argument('--desktop-restart-config', type=Path,
+                        help='Optional user opt-in for checkpointed Desktop restart/recovery')
     args = parser.parse_args()
     url = urlsplit(args.server_url)
     if url.scheme != 'http' or url.hostname != '127.0.0.1' or url.path or url.query or url.fragment or url.username:
@@ -538,7 +573,22 @@ def main():
             parser.error('Invalid control token')
         supervisor = Supervisor(args.state_dir, [str(args.launcher.resolve())], args.server_url,
                                 args.api_key_file, args.model, console_log=args.console_log)
-        server = ThreadingHTTPServer(('127.0.0.1', args.control_port), control_handler(supervisor, token))
+        desktop, desktop_error = None, None
+        if args.desktop_restart_config and args.desktop_restart_config.is_file():
+            try:
+                if __package__:
+                    from .claude_desktop_runtime import DesktopRuntime, read_json
+                    from .claude_desktop_restart import DesktopRestartController
+                else:
+                    from claude_desktop_runtime import DesktopRuntime, read_json
+                    from claude_desktop_restart import DesktopRestartController
+                desktop = DesktopRestartController(args.state_dir, DesktopRuntime(
+                    read_json(args.desktop_restart_config)), publish_fn=publish)
+            except (OSError, ValueError):
+                desktop_error = 'desktop_configuration_invalid'
+                print('Desktop restart recovery is disabled: inspect its saved configuration.', flush=True)
+        server = ThreadingHTTPServer(('127.0.0.1', args.control_port),
+                                     control_handler(supervisor, token, desktop, desktop_error))
         server.daemon_threads = True
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         try:
@@ -554,6 +604,12 @@ def main():
             pass
         finally:
             supervisor.stopping.set()
+            desktop_close_error = None
+            if desktop is not None:
+                try:
+                    desktop.close()
+                except RuntimeError as exc:
+                    desktop_close_error = exc
             if thread.is_alive():
                 server.shutdown()
             server.server_close()
@@ -563,6 +619,8 @@ def main():
                     raise RuntimeError('Restart worker did not settle; owned Job cleanup applies on process exit')
             supervisor.process.stop()
             supervisor.log.close()
+            if desktop_close_error is not None:
+                raise desktop_close_error
 
 
 if __name__ == '__main__':

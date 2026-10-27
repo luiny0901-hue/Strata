@@ -8,7 +8,7 @@ $helperPath = Join-Path $PSScriptRoot 'strata_firewall_helpers.ps1'
 . $helperPath
 $allowRuleName = 'StrataOpenCodeLan8080'
 $blockRuleName = 'StrataOpenCodeNotPrivate8080'
-$displayName = 'Strata OpenCode API - Private LAN only'
+$displayName = 'Strata API - Private LAN only'
 
 $activeProfiles = @(Get-NetConnectionProfile -ErrorAction Stop |
     Where-Object { $_.IPv4Connectivity -ne 'Disconnected' })
@@ -92,14 +92,14 @@ foreach ($candidate in $enabledAllows) {
 
 $blockRule = Get-NetFirewallRule -Name $blockRuleName -ErrorAction SilentlyContinue
 if ($blockRule) {
-    Set-NetFirewallRule -Name $blockRuleName -NewDisplayName 'Strata OpenCode API - Block Domain and Public networks' `
+    Set-NetFirewallRule -Name $blockRuleName -NewDisplayName 'Strata API - Block Domain and Public networks' `
         -Description 'Prevents Strata API access on Domain/Public network profiles.' -Direction Inbound -Action Block `
         -Enabled True -Profile Domain,Public -Protocol TCP -LocalPort 8080 -RemoteAddress Any -EdgeTraversalPolicy Block
     $blockRule = Get-NetFirewallRule -Name $blockRuleName
 } else {
     $blockRule = New-NetFirewallRule `
         -Name $blockRuleName `
-        -DisplayName 'Strata OpenCode API - Block Domain and Public networks' `
+        -DisplayName 'Strata API - Block Domain and Public networks' `
         -Description 'Prevents Strata API access on Domain/Public network profiles.' `
         -Direction Inbound `
         -Action Block `

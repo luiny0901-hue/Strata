@@ -1,64 +1,36 @@
 # 처음 사용하는 분께
 
-## 다른 PC의 모델 서버를 사용하는 경우
+## Claude Desktop Code로 작업하기
 
-1. 이 폴더의 압축을 먼저 모두 풉니다.
-2. Windows는 **START-AGENT.bat**, Mac은 **START-AGENT.command**를 엽니다.
-3. 메뉴에서 **1. 처음 설정**을 선택합니다. 필요한 프로그램을 설치하는 동안 창을 닫지 마세요.
-4. 서버 소유자가 알려 준 **서버 주소**와 **연결 키**를 입력합니다.
-5. CUA와 REA 질문은 Enter로 기본 선택을 수락합니다. 운영체제 권한 창은 직접 승인하세요.
-6. 완료 후 **2. 사용 시작**을 선택하고 원하는 작업을 한국어로 입력합니다.
+현재 권장 경로는 **Claude Desktop Code → OpenCodex 프록시 → Strata 서버**입니다.
 
-다음부터는 같은 파일을 열고 **2번**만 선택하세요. 접속이 안 되면 서버 PC가 켜져 있는지 확인한 뒤
-**3. 연결 문제 확인**을 선택합니다. 오류 화면을 닫지 않고 복사해 전달하면 원인 확인에 도움이 됩니다.
+컨텍스트 창은 262,144토큰이며 응답·자동 압축 버퍼는 창 안에 확보합니다. 설정 적용 후 새 Code 세션에서 262.1k 표시를 확인합니다.
 
-Rider 사용자는 설치 후 Rider를 다시 열고 에이전트에서 **OpenCode Strata**를 선택합니다.
-Rider에서는 생각 과정 원문을 숨기고 일반 진행 안내와 완료 보고서는 유지하도록 연결합니다.
-CUA·REA는 화면·파일을 다룰 클라이언트 PC에서 실행되며 서버의 GUI를 원격 조작하는 설정이 아닙니다.
-Hermes는 별도 연결 설정이 필요합니다.
+1. 평소 사용하는 `run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-on.bat` 또는 `...-off.bat`로 Strata를 실행합니다.
+2. OpenCodex 프록시가 실행 중인지 확인합니다.
+3. 연결 설정을 적용하려면 `setup-claude-opencodex.bat`를 실행합니다. 설정은 Claude 형식의 `~/.claude/strata-mcp.json`을 사용하며 CUA·REA를 필요할 때 검색해 실행합니다.
+4. Claude Desktop의 **Code**에서 작업 폴더를 열고 신뢰 확인을 마칩니다.
+5. 모델 선택기에서 **Strata (OpenCodex)**를 선택합니다. MCP 연결과 권한 모드의 확인은 각각 완료합니다.
 
-## 내 PC에서 모델 서버도 실행하는 경우
+설치·외부 PC 연결·진단은 [Claude Desktop Code 연결 안내](docs/CLAUDE_OPENCODEX_KO.md)를 따르세요. 터미널 Claude Code 실행기는 별도이며 Desktop Code 화면을 열지 않습니다.
 
-**클라이언트 자동 설치와 모델 서버 설치는 다릅니다.** Windows 메뉴 4번은 이미 엔진·모델을
-복원한 서버를 실행하는 기능입니다. 새 PC에 모델까지 자동으로 설치하지는 않습니다.
-서버 파일 복원은 [서버 안내](docs/IQ4XS_NVFP4_OPENCODE_SETUP.md),
-Linux 준비는 [Linux 안내](docs/LINUX_NVFP4_SERVER_KO.md)를 따르세요.
+Claude Desktop Code에서 웹 페이지 읽기는 `WebFetch`를 사용할 수 있습니다. 내장 웹 검색이 Strata 경로에서 실패할 때 선택형 검색을 설정하는 방법은 [웹 검색 안내](docs/CLAUDE_WEB_SEARCH_KO.md)를 참고하세요.
 
-Strata 자체를 코딩하면서 서버 전체 재시작까지 맡기려면 관리 모드를 사용합니다.
-관리 모드 활성화 설정이 있으면 일반 ON/OFF 실행기도 관리 모드로 연결됩니다.
-명시적으로 선택하려면 `run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-on-managed.bat` 또는
-`run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-off-managed.bat`를 사용합니다.
-첫 도구 등록과 외부 PC 연결은 [관리 재시작 안내](docs/STRATA_MANAGED_RESTART_KO.md)를 따르세요.
+## 실행 환경을 유지보수할 때
 
-Mac에서 파일 열기가 제한되면 Finder의 '다음으로 열기 → 터미널' 또는 시스템의 허용 안내를 따르세요.
-ZIP 다운로드에서 실행 권한이 사라져 열리지 않으면 터미널에 `bash `를 입력한 뒤
-START-AGENT.command 파일을 끌어다 놓고 Enter를 누르는 방법도 있습니다.
-화면 기록·손쉬운 사용 권한과 설치 관리자 승인은 직접 해야 합니다.
+Claude Desktop Code에서 이 Strata 저장소 폴더를 열고 새 세션을 시작합니다. `strata-maintenance` MCP는 이 프로젝트에서만 사용할 수 있습니다. 일반 앱·게임 개발 폴더에는 불러오지 않습니다. 유지보수 프로젝트에서도 필요 없으면 `/mcp`에서 끄고 다음에 다시 켤 수 있으며, 설정 재적용은 그 선택을 보존합니다.
 
-이 메뉴와 자동 설치 경로는 아직 실제 새 PC에서 검증하지 않았습니다.
+Windows에서 Desktop 재시작 뒤 남은 작업까지 이어가려면 `setup-desktop-restart.bat`를 한 번 실행하고 Strata 관리 실행기를 다시 시작합니다. 작업 중에는 에이전트가 체크포인트를 저장한 뒤 재시작을 요청합니다. Desktop을 닫은 동안 같은 Claude Code의 임시 재개 실행이 남은 작업을 처리하고 원래 대화를 다시 엽니다. [재시작·복구 안내](docs/CLAUDE_SELF_MAINTENANCE_KO.md)의 지원 범위와 취소 방법을 확인하세요.
 
+## 새 PC에서 연결하기
 
-## 지금까지 설정한 기능을 새 PC로 가져오기
+1. 최신 저장소를 내려받아 압축을 풉니다.
+2. 새 PC에 Claude Desktop, Node.js, Python, 그리고 사용할 CUA Driver·REA 실행 환경을 준비합니다.
+3. 해당 PC의 Claude MCP 설정 파일을 준비하고 `setup-claude-opencodex.bat --mcp-config "경로\strata-mcp.json"`으로 적용합니다.
+4. Strata 서버와 OpenCodex 프록시 주소·실행 상태를 확인한 뒤 Claude Desktop Code에서 새 세션을 엽니다.
 
-항상 최신 `Strata-Agent-Client-20261023.zip`을 모두 풀고 시작하세요. 예전 압축파일로 설치하면 최근 개선이 빠집니다. 기존 PC도 새 압축을 풀고 메뉴 **1. 처음 설정**을 다시 선택하면 설치 파일을 갱신할 수 있습니다.
+서버 PC를 초기화하는 경우에는 Strata 코드, ON/OFF 프로필, 모델·Pack 파일과 서버 설정을 별도로 복원해야 합니다. 서버 준비는 [AI 설치 안내](docs/AI_SETUP.md)와 [Linux 서버 안내](docs/LINUX_NVFP4_SERVER_KO.md)를 참고하세요.
 
-- 새 클라이언트에는 OpenCode·CUA·REA 연결, 한국어 지침, 컨텍스트·출력 복구, Rider 진행/완료 표시와 CUA 채팅 승인 중계기를 설치합니다.
-- Rider에서는 기본 백그라운드 CUA를 사용하고, 필요한 전경 입력은 채팅에서 **현재 작업 완료까지 허용** 또는 **허용 안 함**을 선택합니다. 완료·취소·연결 종료 후 해제됩니다. 일반 OpenCode 직접 연결은 동작 1회 승인입니다. 실제 표시 여부는 클라이언트 지원에 따라 확인이 필요합니다.
-- 외부 PC에서는 **서버 PC 주소**를 입력하세요. `127.0.0.1`은 지금 사용하는 PC 자신을 뜻합니다. 집 밖에서는 양쪽 PC에 Tailscale을 연결한 뒤 서버의 Tailscale 주소와 연결 키를 사용합니다.
-- API 연결 키는 서버 소유자에게 따로 받아 입력합니다. 배포 ZIP에 개인 연결 키를 넣지 않습니다.
-- 초기화한 **서버 PC**에는 이 클라이언트 ZIP만으로 엔진·대용량 모델·기존 프로젝트가 복원되지 않습니다. 초기화 전 해당 파일과 서버 설정을 별도로 백업해야 합니다. 서버 안내에 따라 복원한 후 ON/OFF 런처로 실행하세요.
-- 반복 이미지 전처리 캐시는 서버 기능입니다. 클라이언트만 갱신해도 기존 서버에 자동 적용되지는 않으며, 개선된 서버 코드와 ON/OFF 프로필 템플릿으로 다음 실행부터 적용됩니다.
+## Strata 서버 실행
 
-설치 후 메뉴 **3. 연결 문제 확인**으로 파일·연결을 확인하고, Rider에서 새 OpenCode 연결을 시작하세요. 새 Windows/Mac의 실제 설치·권한 UI·외부 네트워크 연결은 아직 검증하지 않았습니다.
-
-
-## 현재 PC의 작업 설정까지 그대로 가져가기
-
-1. 기존 PC에서 **5. 현재 작업 설정 내보내기**를 선택합니다.
-2. 같은 폴더에 생긴 **portable-profile.json**을 설치 폴더와 함께 개인 백업으로 보관합니다.
-3. 새 PC에서는 그 파일을 START-AGENT와 같은 폴더에 넣고 **1. 처음 설정**을 선택합니다.
-4. 서버 주소·연결 키를 입력하면 나머지 작업 설정은 백업에서 자동 복원됩니다. Rider에서 **OpenCode Strata**로 새 대화를 시작합니다.
-
-이전 항목: 작업 단계 제한, 추론 기본값(최근 성공한 Strata 대화의 선택값), 샘플링, 압축 설정, 도구 활성 여부, 등록한 텍스트 지침. 새 서버의 컨텍스트가 작으면 압축 토큰은 그 한도에 맞춰 조정됩니다. CUA/REA와 기본 플러그인은 새 PC용 실행 경로로 다시 설치합니다. 추가 사용자 MCP 실행 명령·별도 플러그인은 이 백업에서 복사하지 않습니다.
-
-API 키·실행 파일 경로·채팅 본문·프로젝트 파일은 내보내지 않습니다. 지침 파일 내용은 포함되므로 백업은 개인적으로 보관하세요. Rider 테마·키맵·라이선스·일반 IDE 설정은 JetBrains 자체 설정 동기화/내보내기 기능으로 별도 이전해야 합니다. 이 백업은 Rider의 OpenCode 연결과 에이전트 동작 설정용입니다.
+`run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-on.bat`은 요청된 비검열 설정으로, `...-off.bat`은 기본 설정으로 실행합니다. 이미 서버가 실행 중이면 다시 시작하지 마세요. 서버 자체를 변경하는 작업은 [관리 재시작 안내](docs/STRATA_MANAGED_RESTART_KO.md)의 체크포인트와 대기 규칙을 따릅니다.

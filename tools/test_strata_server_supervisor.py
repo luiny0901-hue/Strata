@@ -13,7 +13,6 @@ from urllib.request import Request, urlopen
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 from tools.strata_server_supervisor import Supervisor, OwnedProcess, BoundedLog, control_handler, owner_lock
-from tools.configure_strata_server_lifecycle import configure
 
 
 FIXTURE = '''
@@ -325,22 +324,6 @@ class SupervisorTests(unittest.TestCase):
             self.assertIsNone(other.process.child)
         finally:
             other.log.close()
-
-    def test_opt_in_install_preserves_settings_and_is_idempotent(self):
-        config=self.root/'opencode.json'
-        original={'model':'unchanged','providers':{'custom':{'settings':{'apiKey':'fixture'}}},'plugins':['unrelated']}
-        config.write_text(json.dumps(original),encoding='utf-8')
-        configure(config,'http://127.0.0.1:8768',self.root/'token')
-        result=json.loads(config.read_text(encoding='utf-8'))
-        self.assertEqual(result['providers'],original['providers'])
-        self.assertEqual(result['model'],'unchanged')
-        self.assertEqual(len(result['plugins']),2)
-        before=config.read_bytes()
-        configure(config,'http://127.0.0.1:8768',self.root/'token')
-        self.assertEqual(config.read_bytes(),before)
-        with self.assertRaises(ValueError):
-            configure(config,'http://remote.example:8768',self.root/'token')
-
 
 if __name__=='__main__':
     unittest.main()

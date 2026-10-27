@@ -1,4 +1,6 @@
 {
+  "fit_max_tokens": true,
+  "anthropic_tool_cache": true,
   "exe": "@FORK_ROOT@\\engine\\strata.exe",
   "args": [
     "--pack",
@@ -27,7 +29,7 @@
     "32768",
     "--vision",
     "--vram-reserve-mib",
-    "1280",
+    "448",
     "--adapt-async",
     "1",
     "--control-vector-scaled",

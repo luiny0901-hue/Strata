@@ -5,6 +5,7 @@ from pathlib import Path
 import time
 from urllib.request import Request,urlopen
 from tools.benchmark_context_strategies import fixture
+from tools.claude_opencodex_client import gateway, strata_upstream
 
 
 def main():
@@ -15,11 +16,9 @@ def main():
     parser.add_argument('--effort',choices=['none','low','medium','high'],default='none')
     parser.add_argument('--max-output',type=int,default=128)
     args=parser.parse_args();root=args.output.resolve();root.mkdir(parents=True,exist_ok=False)
-    cfg=json.loads((Path.home()/'.config/opencode/opencode.json').read_text(encoding='utf-8'))
-    provider,model=cfg['model'].split('/',1);settings=cfg['providers'][provider]['settings']
-    base=settings['baseURL'].rstrip('/').removesuffix('/v1');key=settings['apiKey']
-    if key.startswith('{file:'):key=Path(key[6:-1]).expanduser().read_text(encoding='utf-8').strip()
-    headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'}
+    base,headers=strata_upstream()
+    model=gateway(Path.home())[1].split('/',1)[1]
+    headers={**headers,'Content-Type':'application/json'}
     def api(route,body=None):
         with urlopen(Request(base+route,data=None if body is None else json.dumps(body).encode(),headers=headers),timeout=240) as response:return json.load(response)
     def idle():
@@ -27,7 +26,7 @@ def main():
         if not slots or any(s.get('is_processing') is not False for s in slots):raise RuntimeError('Server busy or unknown')
     if args.samples<1 or args.max_output<1 or any(t<256 or t+args.max_output>262144 for t in args.targets):
         parser.error('Positive samples/output and targets with output headroom within 262144 are required')
-    evidence={'health':api('/health'),'mode':'direct API SSE; not OpenCode/Rider','effort':args.effort,'max_output':args.max_output,'requests':[],'control_requests':[]}
+    evidence={'health':api('/health'),'mode':'direct Strata API SSE; excludes Desktop UI','effort':args.effort,'max_output':args.max_output,'requests':[],'control_requests':[]}
     def save(): (root/'results.json').write_text(json.dumps(evidence,indent=2),encoding='utf-8')
     save()
     for route in ['/health','/slots','/v1/models']:

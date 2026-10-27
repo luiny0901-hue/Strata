@@ -189,7 +189,7 @@ def _extract_json(text: str) -> str:
     return s[start:]
 
 
-def validated_json(text, validator, finish):
+def validated_json(text, validator, finish, *, extractor=None):
     def pairs(items):
         obj = {}
         for key, value in items:
@@ -204,7 +204,7 @@ def validated_json(text, validator, finish):
     if finish != "stop":
         raise StructuredOutputError(f"structured output was incomplete (finish_reason={finish}); increase the output budget")
     try:
-        value = json.loads(_extract_json(text), object_pairs_hook=pairs, parse_constant=constant)
+        value = json.loads((extractor or _extract_json)(text), object_pairs_hook=pairs, parse_constant=constant)
         canonical = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
     except (ValueError, TypeError) as exc:
         raise StructuredOutputError(f"model did not return valid JSON: {exc}") from exc

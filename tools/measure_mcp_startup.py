@@ -7,6 +7,10 @@ import queue
 import subprocess
 import threading
 import time
+if __package__:
+    from .claude_mcp_config import read as read_mcp
+else:
+    from claude_mcp_config import read as read_mcp
 
 
 def measure(command, environment):
@@ -46,15 +50,14 @@ def measure(command, environment):
 
 def main():
     parser=argparse.ArgumentParser()
-    parser.add_argument('--config',type=Path,default=Path.home()/'.config/opencode/opencode.json')
+    parser.add_argument('--config',type=Path,default=Path.home()/'.claude/strata-mcp.json')
     parser.add_argument('--output',required=True,type=Path)
     args=parser.parse_args()
     if args.output.exists():raise FileExistsError('Use a new evidence output file')
-    config=json.loads(args.config.read_text(encoding='utf-8-sig'))
+    config=read_mcp(args.config)
     results={}
-    for name,server in config.get('mcp',{}).get('servers',{}).items():
-        if server.get('disabled') or server.get('type')!='local':continue
-        try:results[name]=measure(server['command'],server.get('environment',{}))
+    for name,server in config['mcpServers'].items():
+        try:results[name]=measure([server['command'],*server.get('args',[])],server.get('env',{}))
         except Exception as error:results[name]={'error_type':type(error).__name__}
     args.output.parent.mkdir(parents=True,exist_ok=True)
     args.output.write_text(json.dumps(results,indent=2),encoding='utf-8')

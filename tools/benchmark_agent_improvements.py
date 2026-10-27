@@ -8,6 +8,7 @@ import time
 from urllib.request import Request,urlopen
 
 from tools.benchmark_context_strategies import fixture,extract,EXPECTED
+from tools.claude_opencodex_client import gateway, strata_upstream
 
 
 def edit_fixture(count=100):
@@ -27,11 +28,9 @@ def apply_exact(source,old,new):
 class Experiment:
     def __init__(self,root):
         self.root=root;root.mkdir(parents=True,exist_ok=False)
-        cfg=json.loads((Path.home()/'.config/opencode/opencode.json').read_text(encoding='utf-8'))
-        provider,self.model=cfg['model'].split('/',1);settings=cfg['providers'][provider]['settings']
-        self.base=settings['baseURL'].rstrip('/').removesuffix('/v1');key=settings['apiKey']
-        if key.startswith('{file:'):key=Path(key[6:-1]).expanduser().read_text(encoding='utf-8').strip()
-        self.headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'}
+        self.base,headers=strata_upstream()
+        self.model=gateway(Path.home())[1].split('/',1)[1]
+        self.headers={**headers,'Content-Type':'application/json'}
         self.data={'requests':[],'notes':'Direct API experiments; reasoning none; no production policy changed.'}
 
     def api(self,route,body=None):
@@ -127,9 +126,8 @@ class Experiment:
 
 
 def terminal(root):
-    """Independent read-only commands, real bootstrap/preflight, no model timing."""
+    """Independent read-only PowerShell commands; no model timing."""
     root.mkdir(parents=True,exist_ok=False)
-    bootstrap=Path(__file__).resolve().parent/'opencode/powershell-bootstrap.ps1'
     fixtures=[]
     for i in range(4):
         path=root/f'input-{i}.txt';path.write_text('READ_ONLY_FIXTURE\n'*(100+i),encoding='utf-8');fixtures.append(path)
@@ -140,7 +138,7 @@ def terminal(root):
             start=time.perf_counter();outputs=[];commands_to_run=commands if mode=='separate' else ['\n'.join(commands)]
             for index,command in enumerate(commands_to_run):
                 script=root/f'command-{sample}-{mode}-{index}.ps1';script.write_text(command,encoding='utf-8-sig')
-                result=subprocess.run(['powershell.exe','-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',str(bootstrap),'-CommandFile',str(script)],capture_output=True,text=True,encoding='utf-8',timeout=20)
+                result=subprocess.run(['powershell.exe','-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',str(script)],capture_output=True,text=True,encoding='utf-8',timeout=20)
                 if result.returncode:raise RuntimeError(result.stderr)
                 outputs.extend(int(line) for line in result.stdout.splitlines() if line.strip())
             # ASCII fixtures: .NET ReadAllText retains CRLF, Python read_text normalizes it.

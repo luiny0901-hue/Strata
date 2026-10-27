@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "id": "unity-manual",
+      "name": "Unity Manual",
+      "host": "docs.unity3d.com",
+      "path_contains": ["/manual/", "/documentation/manual/"],
+      "seed_urls": ["https://docs.unity3d.com/Manual/index.html"]
+    },
+    {
+      "id": "unreal-engine",
+      "name": "Unreal Engine Documentation",
+      "host": "dev.epicgames.com",
+      "path_contains": ["/documentation/en-us/unreal-engine/"],
+      "seed_urls": ["https://dev.epicgames.com/documentation/en-us/unreal-engine/"]
+    },
+    {
+      "id": "huggingface-docs",
+      "name": "Hugging Face Documentation",
+      "host": "huggingface.co",
+      "path_contains": ["/docs/"],
+      "seed_urls": ["https://huggingface.co/docs/"]
+    },
+    {
+      "id": "github-docs",
+      "name": "GitHub Documentation",
+      "host": "docs.github.com",
+      "path_contains": ["/en/"],
+      "seed_urls": ["https://docs.github.com/en/"]
+    },
+    {
+      "id": "python-docs",
+      "name": "Python Documentation",
+      "host": "docs.python.org",
+      "path_contains": ["/3/"],
+      "seed_urls": ["https://docs.python.org/3/"]
+    },
+    {
+      "id": "claude-platform-docs",
+      "name": "Claude Platform Documentation",
+      "host": "platform.claude.com",
+      "path_contains": ["/docs/en/"],
+      "seed_urls": ["https://platform.claude.com/docs/en/home"]
+    },
+    {
+      "id": "claude-code-docs",
+      "name": "Claude Code Documentation",
+      "host": "code.claude.com",
+      "path_contains": ["/docs/en/"],
+      "seed_urls": ["https://code.claude.com/docs/en/overview"]
+    }
+  ]
+}

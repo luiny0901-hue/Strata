@@ -11,6 +11,10 @@ import random
 import re
 import time
 from urllib.request import Request,urlopen
+if __package__:
+    from .claude_opencodex_client import gateway, strata_upstream
+else:
+    from claude_opencodex_client import gateway, strata_upstream
 
 
 EXPECTED={'early':'E17','middle':'M29','late':'L43','retry_limit':3}
@@ -33,19 +37,16 @@ def fixture(lines):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--config',type=Path,default=Path.home()/'.config/opencode/opencode.json')
+    parser.add_argument('--home',type=Path,default=Path.home(),help='Claude/OpenCodex user configuration root')
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--targets',type=int,nargs='+',default=[131072,196608,245760])
     parser.add_argument('--edge-cases-only',action='store_true')
     args=parser.parse_args()
     if any(t<4096 or t>250000 for t in args.targets):parser.error('targets must be 4096..250000')
     root=args.output.resolve();root.mkdir(parents=True,exist_ok=False)
-    config=json.loads(args.config.read_text(encoding='utf-8'))
-    provider,model=config['model'].split('/',1)
-    settings=config['providers'][provider]['settings'];base=settings['baseURL'].rstrip('/').removesuffix('/v1')
-    key=settings['apiKey']
-    if key.startswith('{file:'):key=Path(key[6:-1]).expanduser().read_text(encoding='utf-8').strip()
-    headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'}
+    base,headers=strata_upstream(args.home)
+    model=gateway(args.home)[1].split('/',1)[1]
+    headers={**headers,'Content-Type':'application/json'}
     def api(route,body=None,timeout=180):
         req=Request(base+route,data=None if body is None else json.dumps(body).encode(),headers=headers)
         with urlopen(req,timeout=timeout) as response:return json.load(response)

@@ -53,3 +53,6 @@ GUI 작업은 기존 CUA 경로를 사용한다. 현재 창·스크린샷/elemen
 증거는 `C:\Users\luiny\Strata-data\diagnostics\` 아래 `step-budget-200-20261023-a`, `step-budget-512-20261023-a`, `managed-restart-review-20261023-a`, `managed-restart-review-failure-20261023-a`, `early-cancel-review-20261023-a`, `ready-cancel-review-20261023-a`에 보존했다. 실패한 조기 취소의 events/requests/rpc-timings도 유지했다.
 
 실행기는 `tools/test_acp_foreground_runtime.py --step-limit 200 --required-tool-steps 210 --expect-step-stop` 및 `--step-limit 512 --required-tool-steps 210`으로 단계 조건을 선택한다. 실제 installed OpenCode 경로와 새로운 --output을 지정해야 한다. 재시작 검사는 `tools/test_server_restart_acp_runtime.py --turns 3` / `--fail-restart`를 사용했다.
+
+
+2026-10-24 후속: 제목용 추가 추론과 첫 내용 전 취소 스트림 경로의 실제 Strata 검증은 [후속 보완 기록](LONG_AGENT_REPAIR_20261024_KO.md)을 참고한다. 위의 이전 실패 이력은 유지하며 모든 취소 타이밍의 성공을 뜻하지 않는다.

@@ -838,6 +838,13 @@ print(r.choices[0].message.content)
   with no `"thinking"`, effort or budget thinks as the model's template does. `"anthropic_thinking": "on_request"` in
   `strata-<model>.json` renders such a request without thinking - Anthropic's own rule, and what Claude Code's short
   helper calls (a session title in a few dozen tokens) need; its real turns ask for thinking when it is on there.
+- **Anthropic ToolSearch prompt cache (opt-in).** `"anthropic_tool_cache": true` keeps eager tool definitions in
+  the prompt header and places a selected deferred definition beside its first visible `tool_reference` result.
+  The parser and forced-call checks still use the complete selected tool list. Definitions whose search result
+  was compacted away stay in the header; deferred-only or ambiguous tool lists use the original layout. The
+  default is off and OpenAI/Responses requests do not use this projection. `/v1/messages/count_tokens` applies the
+  same projection as generation. This changes placement, not permissions or input truncation. See the local
+  [Claude Code measurement and limits](CLAUDE_CODE_MCP_CACHE_20261025_KO.md) before enabling it for other clients.
 - **Streaming.** With `"stream": true` everything arrives as it is made: the thinking, the answer, and tool calls
   (the tool's name first, then its arguments piece by piece, like OpenAI and Anthropic do). While the model reads a
   long prompt the stream sends keep-alives, so agents do not time out; the server window prints progress every
@@ -850,13 +857,6 @@ print(r.choices[0].message.content)
   second call's parameters merge into the first). Anything else in those forms stays the text it is. Measured on
   1,462 agent turns (Qwen3.8 under Claude Code, from signalnine/q27's drift corpus): 98.3% read as intended with it,
   92.9% without. Off by default, so what a client gets back is unchanged unless you turn it on.
-- **opencode's environment block in the user turn (opt-in).** opencode writes an `<env>` block (working directory,
-  today's date) near the start of its system message, ahead of ~40K characters of instructions and tool definitions that
-  are the same in every session. The prefix cache only reuses a prompt's start, so every new folder and every new day
-  read ~14K tokens again. `"env_to_user": true` moves that block to the front of the first user message: the system
-  turn is then the same for every session and the disk prefix cache restores it. Measured (RTX 5070 Ti Laptop, Swift 1.5
-  IQ3_XXS, a new opencode session in a second folder): first request 14,073 tokens with 13,693 from the cache, 1.1 s,
-  against 14,753 read, 11.9 s, without it; the model still answered the folder and date correctly (3/3). Off by default.
 - **Prefill progress in the stream (opt-in).** `"return_progress": true` puts that progress on the stream instead of
   sending only the keep-alive, as one extra field on a chunk with an empty delta: `prompt_progress` with `total`,
   `cache`, `processed` and `time_ms`. Those are llama.cpp's four fields and mean the same there (`time_ms` is the time
@@ -869,40 +869,6 @@ print(r.choices[0].message.content)
 - **Chat apps.** Any app with an "OpenAI-compatible" provider works: base URL `http://127.0.0.1:8080/v1`, any API key.
   Zed's llama.cpp provider reads `/props` and offers tools from `chat_template_caps`. Its generic OpenAI-compatible
   provider does not: add `"capabilities": {"tools": true, "chat_completions": true}` on that model in Zed's settings.
-- **OpenCode** (#543). A starting point for `opencode.jsonc` (in your project, or `~/.config/opencode/`); the field
-  names are OpenCode's, so check its config docs if your version differs:
-
-  ```jsonc
-  {
-    "$schema": "https://opencode.ai/config.json",
-    "provider": {
-      "strata": {
-        "npm": "@ai-sdk/openai-compatible",
-        "name": "Strata (local)",
-        "options": { "baseURL": "http://127.0.0.1:8080/v1", "apiKey": "none" },  // or your api_key
-        "models": {
-          "strata": {
-            "name": "Qwen3.8-Flash-Next (Strata)",
-            // context: what you chose in setup; output: what one reply may use (prompt + output must fit)
-            "limit": { "context": 262144, "output": 32768 },
-            "options": { "reasoningEffort": "high" },                  // sent as reasoning_effort
-            "variants": {                                              // switch between them in OpenCode
-              "low": { "reasoningEffort": "low" },
-              "medium": { "reasoningEffort": "medium" },
-              "none": { "reasoningEffort": "none" }
-            }
-          }
-        }
-      }
-    },
-    "model": "strata/strata"
-  }
-  ```
-
-  Set `limit.context` to the context you chose in setup: OpenCode compacts the conversation before it gets there.
-  Keep `limit.output` well under it: a request whose prompt plus `max_tokens` runs past the context is refused (see
-  **Context** below), or add `"fit_max_tokens": true` to `strata-<model>.json`. For a hard cap on the thinking, add
-  `"reasoning_budget_tokens": N` to `strata-<model>.json` (see above).
 - **Claude Code** (Strata 0.1.17 or newer): set `ANTHROPIC_BASE_URL=http://127.0.0.1:8080` and
   `ANTHROPIC_MODEL` to a Claude model name it knows (it refuses names it doesn't; Strata ignores the name), plus any
   `ANTHROPIC_AUTH_TOKEN` (or your `api_key`, if you set one).

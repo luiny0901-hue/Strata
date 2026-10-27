@@ -1,6 +1,6 @@
 <h1 align="center">Strata</h1>
 
-Personal OpenCode/CUA setup: [한국어 빠른 시작](docs/OPENCODE_QUICKSTART_KO.md).
+Claude Desktop Code → OpenCodex → Strata setup: [한국어 빠른 시작](START-HERE-AGENT-KO.md).
 
 **English** · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [Deutsch](README.de.md) · [Français](README.fr.md) · [Español](README.es.md) · [Português](README.pt-BR.md)
 

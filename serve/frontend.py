@@ -204,7 +204,7 @@ def _check_parts(content, path: str, kinds):
     """A request's content parts (on chat) or content blocks (on messages), looked at while the request is converted.
     A part whose type this server does not read (a file, audio, a document, Anthropic's tool_reference,
     search_result, server_tool_use / web_search_tool_result blocks, ...) is left out of the prompt exactly as it always
-    was, with a debug line: real clients (Claude Code, Codex, opencode, Cline, Continue, Open WebUI) send such parts
+    was, with a debug line: real clients (Claude Code, Codex, Cline, Continue, Open WebUI) send such parts
     next to text the model can answer from, so refusing them would break requests that work.  A "refusal" part is read
     as its text, as /v1/responses does.  Content that is not a list, and a part that is not an object, passes through
     unchanged."""
@@ -380,42 +380,6 @@ def unmark_think_literals(prompt: str, tags: dict[str, str] = LITERAL_TAGS) -> t
     return "".join(out), spans
 
 
-# Config "env_to_user" (opt-in): opencode writes its <env> block (working directory, today's date) near the START of
-# the system message, before ~40K characters of instructions and tool definitions that are the same in every session.
-# The prefix cache only reuses a prompt's start, so a new folder or a new day read all of it again (~14K tokens, 8-11 s).
-# Moved to the front of the first user message, the system turn (and the tools the template writes into it) is the same
-# for every session and the disk prefix cache restores it.  The model still sees the same lines, one turn later.
-ENV_TO_USER = False
-_ENV_BLOCK = re.compile(r"(?:[^\n]*environment you are running in:\n)?<env>\n.*?\n</env>\n?", re.S)
-
-
-def _env_to_user(messages: list[dict]) -> list[dict]:
-    if not ENV_TO_USER or not messages or messages[0].get("role") != "system":
-        return messages
-    sys_text = messages[0].get("content")
-    if not isinstance(sys_text, str):
-        return messages
-    m = _ENV_BLOCK.search(sys_text)
-    if m is None:
-        return messages
-    for i in range(1, len(messages)):
-        if messages[i].get("role") != "user":
-            continue
-        block = m.group(0).rstrip("\n")
-        c = messages[i].get("content")
-        if isinstance(c, str):
-            nc = block + "\n\n" + c
-        elif isinstance(c, list):
-            nc = [{"type": "text", "text": block + "\n\n"}] + c
-        else:
-            return messages
-        out = list(messages)
-        out[0] = dict(messages[0], content=sys_text[:m.start()] + sys_text[m.end():])
-        out[i] = dict(messages[i], content=nc)
-        return out
-    return messages
-
-
 def _late_system_to_user(messages: list[dict]) -> list[dict]:
     """The chat template takes a system message only at the start ("System message must be at the beginning").
     Clients also send them mid-conversation - Claude Code's hook context as {"role": "system"} after the first user
@@ -450,7 +414,7 @@ def _stable_tool_order(tools: list[dict], name_of) -> list[dict]:
     """The same set of tools comes back in the order it was first seen.  Clients send their tools in the order their
     MCP servers finished registering, which can differ from one request (or one client restart) to the next, and the
     template renders the tool list before the system prompt: one swap moves the shared prefix back thousands of
-    tokens and the whole conversation is read again (opencode issue 23571).  A request's first sight of a tool set
+    tokens and the whole conversation is read again. A request's first sight of a tool set
     is untouched (so its prompt is byte for byte what the client sent); later requests with the same names in
     another order are put back in that first order.  Duplicate names, or a single tool: left as sent."""
     if len(tools) < 2:
@@ -555,7 +519,7 @@ def openai_to_messages(req: dict) -> tuple[list[dict], list[dict] | None, dict]:
             kwargs = {"enable_thinking": False}
         elif k == "reasoning_effort" and "enable_thinking" not in kwargs:
             kwargs.update(effort_kwargs(v))
-    return _env_to_user(_late_system_to_user(messages)), tools, kwargs
+    return _late_system_to_user(messages), tools, kwargs
 
 
 BILLING_HEADER = "x-anthropic-billing-header:"
@@ -592,6 +556,7 @@ def anthropic_to_messages(req: dict, think_unasked: bool = True) -> tuple[list[d
     without "thinking", an effort or a budget gets the template's default (it thinks), as through 0.1.31; False
     renders it without thinking (#278, the config's "anthropic_thinking": "on_request")."""
     messages = []
+    referenced_tools = set()
     system = req.get("system")
     if system:
         messages.append({"role": "system",
@@ -616,8 +581,14 @@ def anthropic_to_messages(req: dict, think_unasked: bool = True) -> tuple[list[d
             elif kind == "thinking":
                 reasoning.append(block.get("thinking", ""))
             elif kind == "tool_use":
+                if isinstance(block.get("name"), str):
+                    referenced_tools.add(block["name"])
                 calls.append({"function": {"name": block.get("name"), "arguments": tool_arguments(block.get("input"))}})
             elif kind == "tool_result":
+                if isinstance(block.get("content"), list):
+                    referenced_tools.update(part.get("tool_name") for part in block["content"]
+                                            if isinstance(part, dict) and part.get("type") == "tool_reference"
+                                            and isinstance(part.get("tool_name"), str))
                 # A tool's image (Claude Code's Read of a picture) reaches the encoder like a user's, as the OpenAI
                 # path's tool messages already do; a text-only result is one string, as before.
                 messages.append({"role": "tool", "content": _parts_of(_check_parts(
@@ -630,8 +601,14 @@ def anthropic_to_messages(req: dict, think_unasked: bool = True) -> tuple[list[d
             if calls:
                 out["tool_calls"] = calls
             messages.append(out)
+    # Deferred definitions belong to the client's tool-search catalog. Rendering
+    # them eagerly defeats that protocol and can exhaust the model's context.
+    # Search results reference selected definitions; clients may keep their
+    # defer_loading flag on subsequent requests. Previously used tools remain
+    # available when a client trims their original search result from history.
     tools = [{"name": t["name"], "description": t.get("description", ""), "parameters": t.get("input_schema", {})}
-             for t in _tool_list(req.get("tools"), None)] or None
+             for t in _tool_list(req.get("tools"), None)
+             if t.get("defer_loading") is not True or t["name"] in referenced_tools] or None
     kwargs = {}
     # Anthropic: "thinking": {"type": "disabled"} or {"type": "enabled", "budget_tokens": N};
     # "output_config": {"effort": "low" | "medium" | "high"}
@@ -651,7 +628,52 @@ def anthropic_to_messages(req: dict, think_unasked: bool = True) -> tuple[list[d
         # A config's reasoning_effort still applies: Service.with_shared sets output_config before this runs.  A
         # request that gives its own reasoning_budget_tokens (#123) asks for thinking, so it thinks as before.
         kwargs["enable_thinking"] = False
-    return _env_to_user(_late_system_to_user(messages)), tools, kwargs
+    return _late_system_to_user(messages), tools, kwargs
+
+
+def anthropic_tool_cache_prompt(req: dict, messages: list[dict], tools: list[dict] | None):
+    """Opt-in prompt projection for client-owned ToolSearch, without changing callable tools.
+
+    Keep eager definitions in the stable header and put selected deferred definitions beside their first visible
+    tool_reference. Parser/forced-call validation still receives the original `tools`. If a compacted history only
+    retains tool_use, keep that definition in the header rather than hiding it. No process/session cache is needed.
+    """
+    if not tools:
+        return messages, tools
+    if len({t['name'] for t in tools}) != len(tools):
+        return messages, tools
+    deferred = {t['name'] for t in _tool_list(req.get('tools'), None) if t.get('defer_loading') is True}
+    selected = {t['name']: t for t in tools if t['name'] in deferred}
+    # The stable header must retain the template's function-call instructions.
+    if not selected or not any(t['name'] not in selected for t in tools):
+        return messages, tools
+    results = [block for m in _object_list(req.get('messages'), 'messages')
+               for block in (m.get('content') if isinstance(m.get('content'), list) else [])
+               if isinstance(block, dict) and block.get('type') == 'tool_result']
+    positions = [i for i, m in enumerate(messages) if m.get('role') == 'tool']
+    if len(results) != len(positions):
+        return messages, tools
+    projected, moved = list(messages), set()
+    for block, index in zip(results, positions):
+        names = []
+        for part in block.get('content') if isinstance(block.get('content'), list) else []:
+            if not isinstance(part, dict) or part.get('type') != 'tool_reference':
+                continue
+            name = part.get('tool_name')
+            if isinstance(name, str) and name in selected and name not in moved:
+                names.append(name)
+                moved.add(name)
+        if not names:
+            continue
+        text = ('ToolSearch loaded these function definitions. Use the same function-call format as the tools above:\n'
+                + '\n'.join(json.dumps(selected[name], ensure_ascii=False) for name in names))
+        message = messages[index]
+        content = message.get('content')
+        content = [*content, {'type': 'text', 'text': text}] if isinstance(content, list) else (content or '') + '\n' + text
+        projected[index] = {**message, 'content': content}
+    if not moved:
+        return messages, tools
+    return projected, [t for t in tools if t['name'] not in moved]
 
 
 # ------------------------------------------------------------------------------------------------ output parser

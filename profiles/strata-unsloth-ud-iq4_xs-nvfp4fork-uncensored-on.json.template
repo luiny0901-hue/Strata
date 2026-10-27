@@ -1,4 +1,6 @@
 {
+  "fit_max_tokens": true,
+  "anthropic_tool_cache": true,
   "exe": "@FORK_ROOT@\\engine\\strata.exe",
   "args": [
     "--pack",
@@ -12,7 +14,7 @@
     "--expert-cache",
     "auto",
     "--prefill",
-    "auto",
+    "auto:16384",
     "--spec",
     "4",
     "--spec-min-p",
@@ -27,7 +29,7 @@
     "32768",
     "--vision",
     "--vram-reserve-mib",
-    "1280",
+    "448",
     "--adapt-async",
     "1",
     "--control-vector-scaled",
@@ -38,7 +40,15 @@
     "--cvec-mode",
     "project",
     "--cvec-dir",
-    "per-layer"
+    "per-layer",
+    "--conversation-cache-mib",
+    "8192",
+    "--conversation-cache-slots",
+    "2",
+    "--conversation-cache-min-free-mib",
+    "8192",
+    "--conversation-cache-min-tokens",
+    "16384"
   ],
   "cwd": "@FORK_ROOT@",
   "tokenizer": "@PACK_ROOT@\\tokenizer",
@@ -68,5 +78,6 @@
   "anthropic_thinking": "on_request",
   "reasoning_budget_tokens": 8192,
   "reasoning_close_retry": true,
-  "effort_position": "end"
+  "effort_position": "end",
+  "anthropic_response_guard": true
 }
