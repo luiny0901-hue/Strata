@@ -23,7 +23,14 @@ def main(argv=None) -> int:
     parser.add_argument("--data-root", type=Path, default=Path.home() / "Strata-data")
     parser.add_argument("--fork-root", type=Path)
     parser.add_argument("--python", type=Path)
-    parser.add_argument("--gpu", type=int, default=0)
+    default_gpu = os.environ.get("STRATA_SERVER_GPU")
+    if default_gpu is None:
+        gpu_path = Path(os.environ.get("XDG_CONFIG_HOME", Path.home()/".config"))/"strata/server-gpu"
+        if gpu_path.is_file():
+            if gpu_path.stat().st_size > 64:
+                parser.error("Saved server GPU index is invalid")
+            default_gpu = gpu_path.read_text(encoding="utf-8").strip()
+    parser.add_argument("--gpu", type=int, default=default_gpu if default_gpu is not None else 0)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8080)
     args = parser.parse_args(argv)

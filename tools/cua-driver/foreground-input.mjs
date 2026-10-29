@@ -154,7 +154,7 @@ export async function approvedForeground({driver,name,args,frame,captureTools,si
     child.on('exit',()=>fail(new Error('Approved driver exited; do not replay input.')));
     lines.on('line',line=>{try {const msg=JSON.parse(line);const w=waiters.get(msg.id);if(w){waiters.delete(msg.id);clearTimeout(w.timer);msg.error?w.reject(new Error('Driver rejected request')):w.resolve(msg.result);}}catch{fail(new Error('Invalid approved-driver response'));}});
     const request=(method,params,timeout=20000)=>new Promise((resolve,reject)=>{
-      if(signal.aborted || child.exitCode!==null) {reject(new Error('Approved operation cancelled'));return;}
+      if(signal.aborted || child.exitCode!==null || child.signalCode!==null) {reject(new Error('Approved operation cancelled'));return;}
       const id=++serial;
       const timer=setTimeout(()=>{waiters.delete(id);reject(new Error('Approved action timed out; effects unknown. Do not replay.'));},timeout);
       waiters.set(id,{resolve,reject,timer});child.stdin.write(JSON.stringify({jsonrpc:'2.0',id,method,params})+'\n');
@@ -184,7 +184,7 @@ export async function approvedForeground({driver,name,args,frame,captureTools,si
   } finally {
     fail(new Error('Approval consumed.'));
     lines?.close();child?.stdin.end();
-    if(child && child.exitCode===null && child.pid) await new Promise(done=>{
+    if(child && child.exitCode===null && child.signalCode===null && child.pid) await new Promise(done=>{
       const timer=setTimeout(()=>{child.kill();done();},3000);
       child.once('exit',()=>{clearTimeout(timer);done();});
     });

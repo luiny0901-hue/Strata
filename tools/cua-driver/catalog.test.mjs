@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readCatalog } from "./catalog.mjs";
+import childProcess from 'node:child_process';
+import {syncBuiltinESMExports} from 'node:module';
 
 const allowed = new Set(["list_windows"]);
 const fake = `const rl=require('readline').createInterface({input:process.stdin});
@@ -21,4 +23,26 @@ test("catalog missing executable rejects without unhandled spawn error", async (
 test("silent catalog is bounded and is not retried", async () => {
   await assert.rejects(readCatalog(process.execPath, ["-e", "process.stdin.resume()"], allowed,
     { timeoutMs: 100 }), /timed out/);
+});
+
+test('signal-terminated catalog does not wait for an already emitted exit event', async () => {
+  const original = childProcess.spawn;
+  let owned;
+  childProcess.spawn = (...args) => {
+    owned = original(...args);
+    owned.once('spawn', () => setImmediate(() => owned.kill('SIGTERM')));
+    return owned;
+  };
+  syncBuiltinESMExports();
+  try {
+    const start = performance.now();
+    await assert.rejects(readCatalog(process.execPath, ['-e', 'process.stdin.resume()'], allowed), /exited/);
+    const elapsed = performance.now() - start;
+    assert.equal(owned.signalCode, 'SIGTERM');
+    assert.ok(elapsed < 1500, `already exited catalog took ${elapsed.toFixed(1)} ms`);
+  } finally {
+    childProcess.spawn = original;
+    syncBuiltinESMExports();
+    if (owned && owned.exitCode === null && owned.signalCode === null) owned.kill();
+  }
 });

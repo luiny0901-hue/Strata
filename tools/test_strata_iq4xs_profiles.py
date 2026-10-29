@@ -36,6 +36,8 @@ class LauncherImageBudgetTests(unittest.TestCase):
                 self.assertIn("Vision encoding uses CPU.", contents)
                 self.assertIn("check_strata_lan_firewall.ps1", contents)
                 self.assertIn("exit /b 25", contents)
+                self.assertIn("tools\\patch_nvfp4_vision_source_cache.py", contents)
+                self.assertIn("exit /b 28", contents)
                 self.assertIn(
                     "The comparison sent no image.",
                     contents,
@@ -43,6 +45,23 @@ class LauncherImageBudgetTests(unittest.TestCase):
 
 
 class ProfileTemplateTests(unittest.TestCase):
+    def test_installer_gpu_override_is_local_and_invalid_values_do_not_replace_profiles(self):
+        import os
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary)/"profile.json"
+            with patch.dict(os.environ, {"STRATA_SERVER_GPU": "0"}):
+                render_profile(ROOT, "on", ROOT, Path(temporary), path)
+            profile = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(profile["gpu"], 0)
+            self.assertEqual(profile["model_name"], MODEL_KEY)
+            before = path.read_bytes()
+            for value in ("-1", "invalid"):
+                with self.subTest(value=value), patch.dict(os.environ, {"STRATA_SERVER_GPU": value}):
+                    with self.assertRaises(ValueError):
+                        render_profile(ROOT, "off", ROOT, Path(temporary), path)
+                    self.assertEqual(path.read_bytes(), before)
+
     def test_templates_declare_matching_on_and_off_contracts(self) -> None:
         self.assertEqual(
             validate_templates(ROOT),

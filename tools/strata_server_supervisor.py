@@ -270,7 +270,8 @@ class OwnedProcess:
 
 
 class Supervisor:
-    def __init__(self, directory, command, server_url, key_file, model, *, ready_timeout=600, console_log=False):
+    def __init__(self, directory, command, server_url, key_file, model, *, ready_timeout=600, console_log=False,
+                 updates=None):
         self.directory, self.server_url = directory, server_url.rstrip('/')
         self.key_file, self.model, self.ready_timeout = key_file, model, ready_timeout
         self.log = BoundedLog(directory / 'server.log')
@@ -280,6 +281,8 @@ class Supervisor:
         self.worker = None
         self.transaction_active = False
         self.persistence_error = None
+        self.updates = updates
+        self.update_worker = None
         checkpoint = directory / 'restart.json'
         if checkpoint.exists():
             self.job = json.loads(checkpoint.read_text(encoding='utf-8'))
@@ -328,12 +331,35 @@ class Supervisor:
     def start(self):
         if self.port_open():
             raise RuntimeError('Server port is occupied. No existing server was adopted or stopped.')
-        self.process.start()
+        transaction = self.updates.activate(self) if self.updates else None
         try:
+            self.process.start()
             self.wait_ready()
-        except BaseException:
+            if transaction:
+                self.updates.ready(transaction)
+        except BaseException as exc:
             self.process.stop()
-            raise
+            if not isinstance(exc, Exception) or not transaction or self.stopping.is_set() or self.port_open():
+                raise
+            self.updates.restore(transaction, 'Candidate readiness failed; previous fork restored')
+            print('Strata update did not become ready; restoring the previous fork.', flush=True)
+            self.process.start()
+            try:
+                self.wait_ready()
+            except BaseException:
+                self.process.stop()
+                raise
+
+    def watch_updates(self):
+        # Only this owner watches; a release never triggers a live restart.
+        while not self.stopping.is_set():
+            try:
+                result = self.updates.check(stopped=self.stopping.is_set)
+                print('Strata stable update: ' + result['status'] +
+                      ('; applies on next server start' if result['status'] == 'prepared' else ''), flush=True)
+            except (OSError, ValueError):
+                print('Strata update check unavailable; current service retained.', flush=True)
+            self.stopping.wait(86400)
 
     def snapshot(self):
         with self.lock:
@@ -552,6 +578,8 @@ def main():
     parser.add_argument('--console-log', action='store_true', help='Also display child output in the launcher console')
     parser.add_argument('--desktop-restart-config', type=Path,
                         help='Optional user opt-in for checkpointed Desktop restart/recovery')
+    parser.add_argument('--fork-update-root', type=Path,
+                        help='Optional NVFP4 stable-update opt-in; activates prepared bundles on owner startup only')
     args = parser.parse_args()
     url = urlsplit(args.server_url)
     if url.scheme != 'http' or url.hostname != '127.0.0.1' or url.path or url.query or url.fragment or url.username:
@@ -571,8 +599,17 @@ def main():
         token = args.token_file.read_text(encoding='utf-8').strip()
         if len(token) != 64 or any(c not in '0123456789abcdef' for c in token):
             parser.error('Invalid control token')
+        updates = None
+        if args.fork_update_root:
+            if args.fork_update_root.resolve() != args.launcher.resolve().parent:
+                parser.error('fork-update-root must be the launcher directory')
+            if __package__:
+                from .strata_fork_update import ForkUpdates
+            else:
+                from strata_fork_update import ForkUpdates
+            updates = ForkUpdates(args.fork_update_root)
         supervisor = Supervisor(args.state_dir, [str(args.launcher.resolve())], args.server_url,
-                                args.api_key_file, args.model, console_log=args.console_log)
+                                args.api_key_file, args.model, console_log=args.console_log, updates=updates)
         desktop, desktop_error = None, None
         if args.desktop_restart_config and args.desktop_restart_config.is_file():
             try:
@@ -594,6 +631,9 @@ def main():
         try:
             supervisor.start()
             thread.start()
+            if updates and updates.enabled():
+                supervisor.update_worker = threading.Thread(target=supervisor.watch_updates, daemon=True)
+                supervisor.update_worker.start()
             print(f'Managed Strata ready. Local control port: {args.control_port}. Log: {args.state_dir / "server.log"}', flush=True)
             while not supervisor.stopping.wait(1):
                 if supervisor.process.log_error:
@@ -604,6 +644,8 @@ def main():
             pass
         finally:
             supervisor.stopping.set()
+            if supervisor.update_worker:
+                supervisor.update_worker.join(timeout=20)
             desktop_close_error = None
             if desktop is not None:
                 try:

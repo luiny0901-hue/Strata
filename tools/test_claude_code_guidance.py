@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from tools import claude_code_guidance as policy
 
@@ -14,6 +15,31 @@ class ProfessionalGuidanceTests(unittest.TestCase):
         self.project = Path(self.temp.name)/'project'
         self.project.mkdir()
         (self.project/'.git').mkdir()
+
+    def ordered_project_scan(self, names):
+        """Preserve directory order without relying on filesystem enumeration order."""
+        original = policy.os.scandir
+        project = self.project
+
+        class Entry:
+            def __init__(self, name):
+                self.name = name
+                self.path = str(project/name)
+
+            def is_file(self, *, follow_symlinks=True):
+                return True
+
+        class Scan:
+            def __enter__(self):
+                return iter(Entry(name) for name in names)
+
+            def __exit__(self, *_args):
+                return False
+
+        def scan(path):
+            return Scan() if Path(path) == project else original(path)
+
+        return patch.object(policy.os, 'scandir', side_effect=scan)
 
     def test_long_term_rules_and_evidence_are_shared_without_foreign_runtime_commands(self):
         guide = policy.guidance()
@@ -35,6 +61,39 @@ class ProfessionalGuidanceTests(unittest.TestCase):
     def test_missing_shared_section_is_reported_instead_of_silent_policy_loss(self):
         with self.assertRaisesRegex(ValueError, '장기'):
             policy.shared_sections('## 현재\n내용\n', {'장기'})
+
+    def test_duplicate_selected_sections_are_rejected_instead_of_combined(self):
+        with self.assertRaisesRegex(ValueError, '중복.*장기'):
+            policy.shared_sections('## 장기\n기준 A\n## 기타\n참고\n## 장기\n충돌하는 기준 B\n', {'장기'})
+
+    def test_duplicate_recovery_policy_prevents_guidance_generation(self):
+        root = Path(self.temp.name)/'templates'
+        examples = root/'examples/claude'
+        examples.mkdir(parents=True)
+        for name in ('KOREAN_INSTRUCTIONS.md', 'STRATA_SESSION_RECOVERY_KO.md',
+                     'game-engines/UNITY_AGENTS.md', 'game-engines/UNREAL_ENGINE_AGENTS.md',
+                     'professional/DESKTOP_AGENTS.md'):
+            body = (policy.ROOT/'examples/claude'/name).read_text(encoding='utf-8')
+            if name == 'STRATA_SESSION_RECOVERY_KO.md':
+                body += '\n## 현재 상태·변경·검증\n기존 기준을 덮는 중복 지침\n'
+            target = examples/name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(body, encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, '중복.*현재 상태'):
+            policy.managed_guidance(self.project, root=root)
+
+    def test_installed_policy_routes_to_embedded_rules_not_an_unshipped_template(self):
+        for mode in (False, True):
+            with self.subTest(lazy_cua_rea=mode):
+                assets = policy.managed_guidance(self.project, lazy_cua_rea=mode)
+                guide = assets['CLAUDE.md']
+                self.assertFalse('`STRATA_SESSION_RECOVERY_KO.md`' in guide,
+                                 'Installed policy refers to an unshipped source template')
+                self.assertIn('실행·검증과 GUI 처리는 아래 Claude 실행·완료 및 CUA·권한 지침을 따른다.', guide)
+                self.assertEqual(guide.count('## Claude 실행·완료\n'), 1)
+                self.assertEqual(guide.count('## CUA·권한\n'), 1)
+                self.assertNotIn('GUI 입력은 GUI 지침을 따른다.', guide)
+                self.assertIn('GUI 입력은 아래 CUA·권한 지침을 따른다.', guide)
 
     def test_cua_guidance_matches_direct_and_lazy_mcp_delivery(self):
         direct = policy.guidance(lazy_cua_rea=False)
@@ -90,6 +149,37 @@ class ProfessionalGuidanceTests(unittest.TestCase):
         path = self.project/'App.csproj'
         for content in ['<'*70000, '<Project>invalid<', '<Project>'+' '*66000+'<UseWPF>true</UseWPF></Project>']:
             path.write_text(content,encoding='utf-8')
+            self.assertIsNone(policy.project_profile(self.project))
+
+    def test_unreal_marker_after_512_unrelated_entries_is_detected(self):
+        (self.project/'Game.uproject').write_text('{}', encoding='utf-8')
+        entries = [f'junk-{index}.txt' for index in range(512)] + ['Game.uproject']
+        with self.ordered_project_scan(entries):
+            self.assertEqual(policy.project_profile(self.project), 'unreal')
+
+    def test_late_unreal_marker_takes_precedence_over_early_desktop_project(self):
+        (self.project/'App.csproj').write_text(
+            '<Project><PropertyGroup><UseWPF>true</UseWPF></PropertyGroup></Project>', encoding='utf-8')
+        (self.project/'Game.uproject').write_text('{}', encoding='utf-8')
+        entries = ['App.csproj'] + [f'junk-{index}.txt' for index in range(600)] + ['Game.uproject']
+        with self.ordered_project_scan(entries):
+            self.assertEqual(policy.project_profile(self.project), 'unreal')
+
+    def test_desktop_project_after_32_non_ui_projects_is_detected(self):
+        names = [f'Core{index}.csproj' for index in range(40)]
+        for name in names:
+            (self.project/name).write_text('<Project />', encoding='utf-8')
+        (self.project/'Ui.csproj').write_text(
+            '<Project><PropertyGroup><UseWPF>true</UseWPF></PropertyGroup></Project>', encoding='utf-8')
+        with self.ordered_project_scan(names + ['Ui.csproj']):
+            self.assertEqual(policy.project_profile(self.project), 'desktop')
+
+    def test_truncated_directory_scan_does_not_confirm_early_desktop_project(self):
+        (self.project/'App.csproj').write_text(
+            '<Project><PropertyGroup><UseWPF>true</UseWPF></PropertyGroup></Project>', encoding='utf-8')
+        limit = getattr(policy, 'MAX_PROJECT_DIRECTORY_ENTRIES', 16384)
+        entries = ['App.csproj'] + [f'junk-{index}.txt' for index in range(limit)] + ['Game.uproject']
+        with self.ordered_project_scan(entries):
             self.assertIsNone(policy.project_profile(self.project))
 
     def test_compact_resume_context_preserves_scope_without_creating_project_files(self):

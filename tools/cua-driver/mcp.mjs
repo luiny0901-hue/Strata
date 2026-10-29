@@ -119,7 +119,7 @@ actionLines.on("line", (line) => {
         "GUI가 필요한 작업에서 CUA Driver를 자동으로 사용합니다. 작업 시작 때 list_windows로 정확한 창의 PID/HWND를 한 번 찾고, 같은 작업 중에는 재사용하세요. 앱 재시작, 새 창 생성, ID 오류나 불일치가 있을 때만 다시 목록을 읽으세요.",
         "첫 동작 전 get_window_state로 화면을 확인하세요. 표준 컨트롤은 좌표보다 element_token을 우선 사용하고, 캔버스나 접근성 정보가 없는 표면에서만 좌표를 사용하세요.",
         "각 동작 뒤 상태 확인이 필요하면 직전 snapshot_id를 since에 전달하고 include_screenshot:false로 변경된 접근성 트리만 읽으세요. 다음 동작은 새 snapshot의 토큰을 사용하세요. 픽셀 변화 확인, 캔버스 조작, 불확실한 결과에서만 스크린샷을 요청하세요. 기본 tree_format은 markdown이며 both/full_output은 필요한 경우에만 사용하세요.",
-        "입력은 정확한 같은 창에 background만 사용합니다. 승인 없는 foreground, SendInput, 사용자 마우스 및 전역 입력은 금지합니다. 필요한 전경 입력은 approved_foreground_action으로 사용자가 채팅 승인 선택창에서 현재 작업을 승인하면, 해당 클라이언트가 요청 단위 승인 수명을 제공하는 경우에만 완료·취소·연결 종료까지 재사용합니다. 그 기능이 없는 연결은 동작마다 따로 승인합니다. 이 승인 선택창을 자동 조작하지 마세요. background_unavailable 또는 확인된 무동작이면 BACKGROUND_ONLY_UNSUPPORTED로 해당 GUI 단계와 의존 작업을 보류하세요. 다른 입력 경로로 전환하지 마세요. 이미 허가된 독립 코드 작업만 이어가고 차단된 완료 조건은 따로 보고하세요.",
+        "입력은 정확한 같은 창에 background만 사용합니다. 승인 없는 foreground, SendInput, 사용자 마우스 및 전역 입력은 금지합니다. 필요한 전경 입력은 approved_foreground_action으로 사용자가 채팅 승인 선택창에서 현재 작업을 승인하면, 해당 클라이언트가 요청 단위 승인 수명을 제공하는 경우에만 완료·취소·연결 종료까지 재사용합니다. 그 기능이 없는 연결은 동작마다 따로 승인합니다. 이 승인 선택창을 자동 조작하지 마세요. background_unavailable 또는 최신 상태로 미실행이 확인되면 approved_foreground_action으로 필요한 동작의 사람 승인을 요청하세요. 전경 승인이 있어도 가능한 동작은 background를 유지하세요. 결과가 불명확하면 상태부터 확인하고 입력을 재전송하지 마세요. 승인 거부·만료·승인 기능 부재이면 BACKGROUND_ONLY_UNSUPPORTED로 해당 GUI 단계와 의존 작업을 보류하세요. CUA 밖의 입력 경로로 우회하지 마세요. 이미 허가된 독립 코드 작업만 이어가고 차단된 완료 조건은 따로 보고하세요.",
         "데스크톱 전체 대상은 금지합니다. 조작 결과가 불명확하거나 권한이 거부되면 멈추고 보고하세요. 전역/네이티브 입력 또는 셸로 우회하지 않습니다. 에이전트 커서는 물리 포인터와 별도입니다.",
       ].join(" ");
       process.stdout.write(`${JSON.stringify(msg)}\n`);
@@ -193,7 +193,7 @@ parentLines.on("line", async (line) => {
     const name = msg.params?.name;
     const args = msg.params?.arguments ?? {};
     if (!isSafeCall(name, args)) {
-      errorResult(msg.id, "permission_denied", `Cua policy refused '${name}': exact window and background delivery only. Foreground, global input and the user's mouse are forbidden. Do not bypass via shell/native input.`);
+      errorResult(msg.id, "permission_denied", `Cua policy refused '${name}': exact window and background delivery only. Foreground requires confirmed background unavailability/non-execution and human approval through approved_foreground_action. Do not bypass via shell/native/global input.`);
       return;
     }
     try {

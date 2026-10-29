@@ -804,7 +804,7 @@ def resolve_runtime_python(previous):
     return str(Path(sys.executable).resolve())
 
 
-def _localize_rea_launcher(source):
+def _localize_rea_launcher(source, runtime_python=None):
     """Point imported REA entries at this client checkout."""
     normalized = mcp_config_module.normalize(source)
     rea = normalized['mcpServers'].get('rea')
@@ -812,7 +812,70 @@ def _localize_rea_launcher(source):
     launcher = ROOT/'tools/claude_mcp/rea_launcher.py'
     if args and Path(args[0].replace('\\', '/')).name.lower() == 'rea_launcher.py' and launcher.is_file():
         args[0] = str(launcher.resolve())
+        if runtime_python:
+            rea['command'] = runtime_python
     return normalized
+
+
+def local_cua_executable(configured=None):
+    """Resolve a client-local install, never reuse a missing foreign-machine path."""
+    override = os.environ.get('STRATA_CUA_DRIVER_EXE')
+    if override:
+        selected = Path(override).expanduser()
+        if not selected.is_file() or not os.access(selected, os.X_OK):
+            raise ValueError('STRATA_CUA_DRIVER_EXE 실행 파일을 확인하세요. 다른 경로로 대체하지 않습니다.')
+        return str(selected.resolve())
+    if configured:
+        selected = Path(configured).expanduser()
+        if selected.is_file() and os.access(selected, os.X_OK):
+            return str(selected.resolve())
+    located = shutil.which('cua-driver')
+    if located:
+        return str(Path(located).resolve())
+    name = 'cua-driver.exe' if sys.platform == 'win32' else 'cua-driver'
+    candidates = [Path.home()/'.local/bin'/name]
+    if sys.platform == 'darwin':
+        candidates.extend([Path('/Applications/CuaDriver.app/Contents/MacOS/cua-driver'),
+                           Path.home()/'Applications/CuaDriver.app/Contents/MacOS/cua-driver'])
+    for selected in candidates:
+        if selected.is_file() and os.access(selected, os.X_OK):
+            return str(selected.resolve())
+    raise ValueError('이 PC의 CUA Driver가 없습니다. https://cua.ai/docs/cua-driver/quickstart 에서 설치한 뒤 다시 실행하세요. 다른 경로이면 STRATA_CUA_DRIVER_EXE를 지정하세요.')
+
+
+def default_client_mcp_source():
+    """A fresh PC uses the same guarded CUA and pinned REA launchers as this repo."""
+    node = shutil.which('node')
+    if not node or not shutil.which('npx'):
+        raise ValueError('새 PC에는 Node.js와 npm이 필요합니다. https://nodejs.org/en/download 에서 설치하고 새 터미널에서 다시 실행하세요.')
+    return {'mcpServers': {
+        'cua-driver': {'type': 'stdio', 'command': node,
+            'args': [str(ROOT/'tools/cua-driver/mcp.mjs')],
+            'env': {'CUA_DRIVER_EXE': local_cua_executable(),
+                    'CUA_DRIVER_POLICY_FILE': str(ROOT/'tools/cua-driver/window-scoped.rego'),
+                    'CUA_DRIVER_PERMISSION_MODE': 'standard', 'STRATA_CUA_CATALOG_REVISION': '2'}},
+        'rea': {'type': 'stdio', 'command': str(Path(sys.executable).resolve()),
+            'args': [str(ROOT/'tools/claude_mcp/rea_launcher.py'), 'rea-agents@6.7.0', 'mcp']}}}
+
+
+def desktop_config_library(home):
+    """Match OpenCodex/Desktop platform paths without assuming Windows AppData."""
+    configured = os.environ.get('CLAUDE_3P_CONFIG_LIBRARY') or os.environ.get('OPENCODEX_CLAUDE_DESKTOP_CONFIG_DIR')
+    if configured:
+        return Path(configured).expanduser()
+    explicit = os.environ.get('CLAUDE_USER_DATA_DIR')
+    if explicit:
+        return Path(explicit).expanduser()/'configLibrary'
+    actual_home = home.expanduser().resolve() == Path.home().resolve()
+    if sys.platform == 'darwin':
+        root = home/'Library/Application Support/Claude-3p'
+    elif sys.platform.startswith('linux'):
+        xdg = os.environ.get('XDG_CONFIG_HOME') if actual_home else None
+        root = (Path(xdg) if xdg else home/'.config')/'Claude-3p'
+    else:
+        local = os.environ.get('LOCALAPPDATA') if actual_home else None
+        root = (Path(local) if local else home/'AppData/Local')/'Claude-3p'
+    return root/'configLibrary'
 
 
 def _localize_cua_launcher(source):
@@ -828,13 +891,16 @@ def _localize_cua_launcher(source):
     environment = cua.get('env')
     if isinstance(environment, dict):
         policy = ROOT/'tools/cua-driver/window-scoped.rego'
+        configured_driver = environment.get('CUA_DRIVER_EXE')
+        if configured_driver:
+            environment['CUA_DRIVER_EXE'] = local_cua_executable(configured_driver)
         configured_policy = environment.get('CUA_DRIVER_POLICY_FILE')
         if (isinstance(configured_policy, str)
                 and Path(configured_policy.replace('\\', '/')).name.lower() == 'window-scoped.rego'
                 and policy.is_file()):
             environment['CUA_DRIVER_POLICY_FILE'] = str(policy.resolve())
     command = cua.get('command')
-    if isinstance(command, str) and Path(command).name.lower() in ('node', 'node.exe'):
+    if isinstance(command, str) and Path(command.replace('\\', '/')).name.lower() in ('node', 'node.exe'):
         located = shutil.which('node')
         if located:
             cua['command'] = str(Path(located).resolve())
@@ -845,10 +911,11 @@ def _localize_cua_launcher(source):
 
 def resolve_mcp_source(home, mcp_config=None):
     """Load the Claude-owned MCP source, optionally importing a Claude-format file."""
+    runtime_python = resolve_runtime_python(read_json(home/'.claude'/STATE, {}))
     source_path = home/'.claude'/MCP_SOURCE
     if source_path.is_file():
         original = mcp_config_module.read(source_path)
-        source = _localize_cua_launcher(_localize_rea_launcher(original))
+        source = _localize_cua_launcher(_localize_rea_launcher(original, runtime_python))
         payload = (json.dumps(source, ensure_ascii=False, indent=2)+'\n'
                    if source != original else None)
         return source, payload, source_path
@@ -862,9 +929,11 @@ def resolve_mcp_source(home, mcp_config=None):
         try:
             source = mcp_config_module.normalize(native_source)
         except ValueError:
-            raise ValueError('Claude 전용 MCP 설정이 없습니다. --mcp-config으로 Claude 형식 파일을 가져오세요.') from None
+            if native_source['mcpServers']:
+                raise
+            source = default_client_mcp_source()
 
-    source = _localize_cua_launcher(_localize_rea_launcher(source))
+    source = _localize_cua_launcher(_localize_rea_launcher(source, runtime_python))
     payload = json.dumps(source, ensure_ascii=False, indent=2)+'\n'
     return source, payload, source_path
 
@@ -1276,11 +1345,7 @@ def diagnose(home):
               'desktop_permission_mode_configuration': desktop_mode_status == 'configured',
               'mcp_tool_search_route_preview': tool_search_route_preview_ready,
               'strata_loaded': True}
-    configured_desktop = os.environ.get('CLAUDE_3P_CONFIG_LIBRARY')
-    local_app_data = (os.environ.get('LOCALAPPDATA')
-                      if home.expanduser().resolve() == Path.home().resolve() else None)
-    desktop = (Path(configured_desktop).expanduser() if configured_desktop else
-               (Path(local_app_data) if local_app_data else home/'AppData'/'Local')/'Claude-3p'/'configLibrary')
+    desktop = desktop_config_library(home)
     info = {'available': False, 'ready': False, 'status': 'not_configured'}
     try:
         if (desktop/'_meta.json').is_file():
@@ -1307,6 +1372,17 @@ def diagnose(home):
     except (OSError, ValueError, TypeError, AttributeError):
         info = {'available': True, 'ready': False, 'status': 'invalid_profile'}
     desktop_ready = bool(info['ready'])
+    # Saved cross-client differences are setup diagnostics, not Claude readiness
+    # gates. A malformed/uninstalled Codex client must not break Claude's doctor.
+    try:
+        if __package__:
+            from .strata_client_settings import audit
+        else:
+            from strata_client_settings import audit
+        client_settings = audit(home)
+    except (OSError, ValueError, TypeError, AttributeError):
+        client_settings = {'configured': False, 'runtime_status': 'not_verified',
+                           'status': 'invalid_saved_client_config'}
     return {'ready': all(checks.values()), 'checks': checks, 'base_url': base, 'model': model,
             'context': min(configured, context) if configured else context, 'server_context': context, 'desktop': info,
             'desktop_ready': desktop_ready,
@@ -1320,6 +1396,7 @@ def diagnose(home):
             'mcp_permissions': mcp_permissions,
             'desktop_permission_mode': desktop_permission_mode,
             'effort_level': effort_level,
+            'client_settings': client_settings,
             'mcp_tool_search': {
                 'configured': tool_search,
                 'mode': ('model_aware_threshold_deferred'

@@ -209,6 +209,54 @@ class SharedClaudeTests(unittest.TestCase):
         shared.setup(self.home, mcp_config=alternate, verify=False)
         self.assertEqual(mcp_source.read_bytes(), before)
 
+    def test_fresh_client_creates_guarded_mcp_without_copying_windows_settings(self):
+        driver = self.home/'native-driver'; driver.write_bytes(b'fixture'); driver.chmod(0o755)
+        def which(name):
+            return str(driver) if name == 'cua-driver' else '/fixture/'+name
+        with patch.object(shared.shutil, 'which', side_effect=which), \
+             patch.dict(os.environ, {'STRATA_CUA_DRIVER_EXE': ''}):
+            source, payload, path = shared.resolve_mcp_source(self.home)
+        cua = source['mcpServers']['cua-driver']
+        self.assertEqual(cua['env']['CUA_DRIVER_EXE'], str(driver.resolve()))
+        self.assertEqual(cua['env']['CUA_DRIVER_PERMISSION_MODE'], 'standard')
+        self.assertIn('window-scoped.rego', cua['env']['CUA_DRIVER_POLICY_FILE'])
+        self.assertEqual(source['mcpServers']['rea']['args'][-2:], ['rea-agents@6.7.0', 'mcp'])
+        self.assertEqual(json.loads(payload), source)
+        self.assertFalse(path.exists())  # still a plan until the existing publisher commits
+
+    def test_copied_windows_cua_paths_are_resolved_on_the_current_client(self):
+        driver = self.home/'local-driver'; driver.write_bytes(b'fixture'); driver.chmod(0o755)
+        original = {'mcpServers': {'cua-driver': {'type': 'stdio', 'command': r'Z:\old\node.exe',
+            'args': [r'Z:\old\tools\cua-driver\mcp.mjs'], 'env': {
+                'CUA_DRIVER_EXE': r'Z:\old\cua-driver.exe',
+                'CUA_DRIVER_POLICY_FILE': r'Z:\old\window-scoped.rego'}}}}
+        saved = json.dumps(original)
+        with patch.object(shared.shutil, 'which', side_effect=lambda name: str(driver) if name == 'cua-driver' else '/fixture/node'), \
+             patch.dict(os.environ, {'STRATA_CUA_DRIVER_EXE': ''}):
+            source = shared._localize_cua_launcher(original)['mcpServers']['cua-driver']
+        self.assertEqual(source['env']['CUA_DRIVER_EXE'], str(driver.resolve()))
+        self.assertEqual(source['command'], str(Path('/fixture/node').resolve()))
+        self.assertEqual(Path(source['args'][0]), shared.ROOT/'tools/cua-driver/mcp.mjs')
+        self.assertEqual(json.dumps(original), saved)
+
+    def test_invalid_explicit_cua_path_does_not_fall_back(self):
+        with patch.dict(os.environ, {'STRATA_CUA_DRIVER_EXE': str(self.home/'missing-driver')}), \
+             patch.object(shared.shutil, 'which') as locate:
+            with self.assertRaisesRegex(ValueError, 'STRATA_CUA_DRIVER_EXE'):
+                shared.local_cua_executable()
+            locate.assert_not_called()
+
+    def test_desktop_paths_follow_mac_linux_and_explicit_user_data(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(Path, 'home', return_value=self.home):
+            with patch.object(shared.sys, 'platform', 'darwin'):
+                self.assertEqual(shared.desktop_config_library(self.home), self.home/'Library/Application Support/Claude-3p/configLibrary')
+            with patch.object(shared.sys, 'platform', 'linux'):
+                self.assertEqual(shared.desktop_config_library(self.home), self.home/'.config/Claude-3p/configLibrary')
+            with patch.dict(os.environ, {'CLAUDE_USER_DATA_DIR': str(self.home/'custom')}):
+                self.assertEqual(shared.desktop_config_library(self.home), self.home/'custom/configLibrary')
+            with patch.dict(os.environ, {'OPENCODEX_CLAUDE_DESKTOP_CONFIG_DIR': str(self.home/'library')}):
+                self.assertEqual(shared.desktop_config_library(self.home), self.home/'library')
+
     def test_claude_mcp_import_relocalizes_a_copied_rea_launcher(self):
         config = self.home/'copied-strata-mcp.json'
         config.write_text(json.dumps({'mcpServers': {'rea': {'type':'stdio',
@@ -217,6 +265,9 @@ class SharedClaudeTests(unittest.TestCase):
         source, payload, path = shared.resolve_mcp_source(self.home, mcp_config=config)
         expected = str((shared.direct.ROOT/'tools/claude_mcp/rea_launcher.py').resolve())
         self.assertEqual(source['mcpServers']['rea']['args'][0], expected)
+        selected_python = shared.resolve_runtime_python({})
+        self.assertEqual(source['mcpServers']['rea']['command'], selected_python)
+        self.assertEqual(json.loads(payload)['mcpServers']['rea']['command'], selected_python)
         self.assertEqual(json.loads(payload)['mcpServers']['rea']['args'][0], expected)
         self.assertEqual(path, self.home/'.claude/strata-mcp.json')
 

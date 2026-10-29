@@ -228,6 +228,26 @@ class RuntimeFixtureTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.runtime.current_session_id(300)
 
+    def test_plain_cli_hook_skips_desktop_package_discovery(self):
+        self.system.processes[300]['parent'] = 1
+        with patch.object(self.system, 'discover', wraps=self.system.discover) as discover, \
+                patch.object(self.system, 'main', wraps=self.system.main) as main, \
+                patch.object(self.system, 'snapshot', wraps=self.system.snapshot) as snapshot:
+            with self.assertRaisesRegex(ValueError, 'not owned'):
+                self.runtime.record_session_start({'session_id': CLI_ID, 'cwd': str(self.project)}, 300)
+        snapshot.assert_called_once_with()
+        discover.assert_not_called()
+        main.assert_not_called()
+        self.assertFalse((self.home/runtime_module.CONFIG_RELATIVE.parent/'desktop-sessions').exists())
+
+    def test_native_candidate_still_requires_the_desktop_ancestor(self):
+        self.system.processes[200]['parent'] = 1
+        with patch.object(self.system, 'discover', wraps=self.system.discover) as discover:
+            with self.assertRaisesRegex(ValueError, 'not owned'):
+                self.runtime.record_session_start({'session_id': CLI_ID, 'cwd': str(self.project)}, 300)
+        discover.assert_called_once_with('Claude_fixture')
+        self.assertFalse((self.home/runtime_module.CONFIG_RELATIVE.parent/'desktop-sessions').exists())
+
     def test_manual_desktop_reopen_prevents_a_second_writer(self):
         binding = self.prepare()
         self.system.live.discard(200)

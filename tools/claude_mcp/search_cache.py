@@ -75,12 +75,16 @@ class SearchCache:
                         raise SearchCacheCancelled("duplicate search wait was cancelled")
                     try:
                         result = future.result(timeout=self.WAIT_POLL_SECONDS)
-                        value = deepcopy(result)
-                        value["query"] = query
-                        value["cache"] = {"status": "deduplicated", "ageSeconds": 0}
-                        return value
                     except TimeoutError:
-                        continue
+                        if not future.done():
+                            continue
+                        # Future.result also raises the producer's own TimeoutError.
+                        # Re-read the completed future to propagate it, not wait forever.
+                        result = future.result()
+                    value = deepcopy(result)
+                    value["query"] = query
+                    value["cache"] = {"status": "deduplicated", "ageSeconds": 0}
+                    return value
 
             try:
                 result = producer()

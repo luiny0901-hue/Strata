@@ -58,3 +58,80 @@ RTX 3090 Ti 한 장, 262,144 컨텍스트, 기존 Low 3,072 / Medium 4,096 / Hig
 - `source-deployment.json`, `installed-deployment.json`, `summary.json`: 백업과 게시·바이트 보존 검증
 
 기존 게시기는 `C:\Users\luiny\.claude\backups\strata-opencodex-*`에 수정 전 바이트와 게시 영수증을 남겼다. 서버·프록시 코드·모델·GPU 선택·추론 한도는 이번에 바꾸지 않았고, 마지막 확인에서 Strata는 loaded=true·in_flight=0·262,144 컨텍스트였다. 커밋·푸시는 하지 않았다.
+
+## 2026-10-28 프로그램·터미널·승인 대기 점검
+
+현재 Claude Desktop Code의 일반 터미널 실행은 네이티브 Claude Code가 소유한다. 폐기된 OpenCode 유한 실행기를 다시 설치하거나 네이티브 CLI/앱 바이너리를 수정하지 않았다. 이 저장소가 소유한 CUA 프로세스 정리·기한·취소, 유지보수 명령/재시작의 완료 경계, 설치/원본 실행 지침을 확인했다.
+
+### 실제 수정: 이미 종료된 CUA 자식의 3초 정리 대기
+
+`catalog.mjs`와 `foreground-input.mjs`는 `exitCode`만 확인했다. Node는 신호 종료 시 `exitCode=null`, `signalCode=신호`가 되므로 이미 종료된 자식에도 새 `exit` 이벤트를 기다리다가 3초 정리 제한까지 소비했다. [Node ChildProcess 문서](https://nodejs.org/api/child_process.html)도 두 필드를 구분한다.
+
+종료 신호도 확인해 이미 종료된 프로세스에는 기다리지 않도록 했다. 승인 동작의 다음 요청도 종료 신호가 있으면 전달하지 않는다. 실제 살아 있는 자식의 3초 정리 유예·20초 초기화·120초 도구 제한, 타이핑 비동기 전달 수명, 사람 승인·창/좌표 검증·불확실한 입력 자동 재전송 금지는 유지했다.
+
+Windows의 설치된 Node v24.22.1에서 실제 Node 자식을 만든 합성 드라이버 시험이다. 네이티브 CUA 실행 파일 대신 입력을 받기만 하는 Node 프로세스로 바꿨으며, 실제 화면·마우스·키보드·UAC 입력은 실행하지 않았다.
+
+| 경로 | 수정 전 | 수정 후 |
+|---|---:|---:|
+| 카탈로그 자식의 신호 종료 | 3,024.2 ms | 약 12.3 ms |
+| 합성 승인 동작 자식의 신호 종료 | 3,039.5 ms | 약 27.7 ms |
+
+이 값은 각 회귀 시험의 단일 표본이며 일반 명령·정상 GUI 작업 전체의 속도 개선율이 아니다. 기존 두 재현 검사는 1.5초 제한을 넘겨 실패했고(`node-before.txt`), 수정 후 통과했다(`node-after.txt`). 거절 또는 승인 응답 전 이미 취소된 경우 드라이버를 전혀 시작하지 않는 것도 합성 시험으로 확인했다. 실제 승인창을 눌러 시험한 결과가 아니다.
+
+### 완료 판단·UAC 경계
+
+공통 실행 원본과 Claude용 지침에 한 문단을 보완했다. 유한 명령은 소유 실행 ID의 종료·종료 코드·필요 산출물을 확인하면 즉시 다음 단계로 간다. 계속 켜둘 GUI/서버는 필요한 대상 창·health·준비 로그를 확인하며 앱 종료까지 기다리지 않는다. 부모 셸 종료나 프롬프트 복귀를 자식 빌드 완료로 오인하지 않는다. [PowerShell Start-Process의 `-Wait`](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/start-process?view=powershell-7.5)는 하위 프로세스까지 종료되기를 기다리므로 단순 앱 실행의 준비 확인과 구분한다.
+
+UAC/보안 데스크톱의 자동 입력·인증 우회는 추가하지 않았다. 기존 권한 부족/사용자 확인 대기는 종속 단계만 보류하고, 이미 허가된 독립 작업은 진행한다. 취소·완료된 요청에 늦은 승인·알림을 재사용하거나 같은 창/명령을 중복 실행하지 않는 경계는 유지했다. 정상적인 무출력 빌드를 임의 중단하거나 네이티브 비동기 타이핑의 필요한 대기를 줄이지 않았다.
+
+### 검증과 적용
+
+- `node --test tools/cua-driver/*.test.mjs`에 해당하는 8개 테스트 파일 전체: **53개 통과**, 건너뜀/취소 0개. PowerShell에서는 파일 배열을 `Get-ChildItem -Filter '*.test.mjs'`로 전달했다. 기존 종료 코드 0/EOF/잘못된 응답/기한 초과/늦은 승인/취소/입력 재전송 금지·타이핑 수명도 포함한다.
+- `python -X utf8 -m unittest tools.test_claude_code_guidance tools.test_claude_opencodex_client tools.test_claude_context_fit tools.test_claude_maintenance -q`: **118개/27.994초 통과**. 유지보수 시험의 재시작은 격리 fixture이며 실제 Strata/Claude를 재시작한 것이 아니다.
+- `py_compile`, 변경 JS `node --check`, 변경 파일 `git diff --check` 통과.
+- 모델 경유 완료/승인 판단 시험은 Strata가 이미 다른 요청을 처리해 `NOT_RUN`으로 남겼다. 생성/토큰 계산 요청을 보내거나 현재 작업을 중단하지 않았다. 실제 GUI 앱·네이티브 터미널 전체·UAC 화면·Linux/macOS의 실사용 지연을 모두 검증한 결과는 아니다.
+- 첫 게시 준비는 운영 생성기의 기존 개별 문구가 소스와 달라 쓰기 전에 중단했다. 해당 기준을 보존하는 좁은 삽입으로 현재 설치 지침·운영 생성기·운영 복구 원본 3개만 게시했다. 역변환으로 다른 바이트·BOM·줄바꿈을 보존했고 권한/훅·MCP·수동 변경 보호 해시는 그대로다.
+
+현재 CUA 설정이 가리키는 저장소의 JS 원본과 새 PC용 원본을 수정했다. 새 MCP 프로세스/새 Code 대화부터 확실히 적용되며 이미 실행 중인 MCP의 코드 교체는 확인하지 않았다. 기존 작업을 보존하기 위해 Desktop·Strata를 재시작하거나 다른 프로세스를 종료하지 않았다. 커밋·푸시는 하지 않았다.
+
+원본·초기 실패/수정 후 검사·후보·게시 백업·보존 증거: `C:\Users\luiny\Strata-data\diagnostics\execution-wait-20261028`.
+
+## 2026-10-28 중복·반복 실행 점검
+
+Claude 유지보수 MCP의 요청 소유권, 지연 MCP의 전달 실패/응답 오류, 검색 공유 실행, CUA 취소·늦은 응답, 기존 supervisor/Desktop 재시작의 operation_id 재사용을 확인했다. 실제 사용자 작업을 재실행하거나 Strata·Desktop을 재시작하지 않았다.
+
+### 재현하고 수정한 경로
+
+- `MaintenanceMcp.handle()`은 같은 활성 요청 ID의 호출이 겹치면 기존 취소 이벤트를 덮어쓰고 도구를 두 번 호출했다. 두 번째 호출의 정리가 원래 실행 추적도 지웠다. 활성 ID를 잠금 안에서 확인해 실행 전 거부하며 원래 취소 이벤트를 유지한다. 완료 후 같은 ID로 새 조회를 하는 경로는 허용한다. 해시 불가능한 ID·null·불리언은 실행 전에 거부하고 잘못된 취소 ID는 무시한다. 완료 ID를 무제한 보관하는 기록이나 모든 인자 문자열에 대한 중복 차단은 추가하지 않았다.
+- `ChildServer._request()`에서 tools/call 전달 중 write/flush가 실패하거나, 실행 결과가 객체가 아닌 잘못된 응답으로 돌아오면 실제 실행 여부가 불확실한데도 다음 호출이 허용됐다. 기존 timeout·연결 종료의 중단 상태 처리를 두 경로에도 적용했다. 이후 해당 자식 연결로 입력을 계속 전달하지 않으며 실제 결과를 확인하라는 오류를 반환한다. 자동 재전송·새 자식 자동 실행은 하지 않는다. 정상 도구 결과와 수정된 인자로 필요한 후속 호출을 일반적으로 막는 캐시는 추가하지 않았다.
+
+격리된 Python stdio 자식은 호출을 받으면 파일에 `executed` 한 줄을 저장한 뒤 잘못된 result를 반환했다. 같은 도구를 두 번 요청할 때 원본 코드는 실제 자식 실행 **2회**, 수정 코드는 **1회**였다(`execution-counts.json`). 전송 확인 실패는 실제 입력 대신 write 기록 후 flush 오류를 내는 fixture에서 확인했다. 유지보수 동시 호출은 도구 경계의 mock으로 원래 취소 이벤트와 실행 수를 검사했다. 실제 GUI 클릭·터미널 업무·UAC를 실행한 결과는 아니다.
+
+### 검증·적용 범위
+
+- 최초 5개 focused 검사에서 중복 실행·잘못된 ID·불확실한 재호출을 재현했다. 5개 테스트 중 4개가 실패/오류를 냈고 정상 완료 후 ID 재사용은 통과했다. 잘못된 ID fixture의 MagicMock 반환값으로 직렬화 오류도 섞여 있어 실제 객체를 반환하도록 fixture만 보완하고 저장한 이전 소스에서 재확인했다(`before-invalid-id-corrected-fixture.txt`). 원본은 여전히 잘못된 ID를 실행하거나 예외를 냈다. 수정 후 focused 5개는 통과했다.
+- `python -X utf8 -m unittest tools.test_claude_maintenance tools.test_claude_desktop_restart tools.test_strata_server_supervisor tools.test_claude_mcp_lazy_dispatcher tools.test_claude_mcp_dispatcher_bounds tools.test_claude_search_cache -q`: **103개/27.107초 통과**. 기존 같은 operation_id 재사용·다른 checkpoint 거부·취소·EOF·중단 후 자동 재생 금지·8개 동시 동일 검색의 공급자 1회 실행도 포함한다. supervisor/Desktop 시험은 격리 fixture이며 운영 서버 재시작 검증으로 확대하지 않는다.
+- 기존 CUA 8개 Node 테스트 파일: **53개 통과**, 건너뜀·취소 0개. Python 구문 검사와 변경 파일 `git diff --check` 통과.
+- 현재 `agent-tools`와 프로젝트 `strata-maintenance` 실행기는 수정한 이 저장소의 소스를 참조한다. 별도 운영 폴더의 오래된 유지보수 어댑터에도 관련 세 부분만 병합하고, 후보의 중복 호출 거부·원래 취소 전달을 확인한 뒤 기존 원자적 게시기로 반영했다. 관련 없는 바이트·BOM·줄바꿈과 권한/훅·MCP 설정·관리 해시는 보존했다. 운영 폴더에 없는 지연 MCP 패키지 일부를 새로 만들지 않았다.
+
+**남은 한계:** 이는 저장소가 소유한 중복 요청·불확실한 전달 경로의 방어다. 모델이 서로 다른 새 요청 ID로 같은 업무를 반복하는 모든 경우를 자동 판별하지 않는다. 정상 재조회·상태가 바뀐 뒤 재실행·새로운 사용자 수정 요청도 있으므로 인자 일치만으로 차단하지 않는다. 네이티브 Claude 터미널, 실제 Desktop 전체 업무, 262K 압축 후 자율 실행을 이번 검사로 검증했다고 하지 않는다.
+
+새 MCP 프로세스/새 Code 대화부터 적용한다. 기존 MCP 프로세스의 재로딩은 확인하지 않았으며 Desktop·Strata 재시작·커밋·푸시는 하지 않았다. 추가 모델 호출·매 요청 훅·승인 단계는 없다.
+
+원본·실패/통과·실제 합성 자식 실행 수·운영 후보/게시 백업: `C:\Users\luiny\Strata-data\diagnostics\duplicate-execution-20261028`.
+
+## 2026-10-28 실행 코드 점검: 잘못된 요청과 취소 경계
+
+최근 변경한 MCP 요청·취소·검색 캐시, CUA 프로세스 정리와 프로젝트 지침 판별 코드를 확인했다. 이번 수정은 재현한 MCP 입력 검증 결함에 한정하며 지침 문구·실행 루프·의존성·추론 설정은 늘리지 않았다.
+
+- 지연 디스패처는 객체·배열·불리언·소수 ID를 `handle()`에서 거부하지 않았다. stdio 경로에서 일부 잘못된 ID는 비동기 접수 분기를 벗어나 읽기 루프에서 도구를 직접 실행할 수 있었다. 이제 명시된 ID는 정확한 문자열/정수만 받으며, 잘못된 ID는 실제 도구 호출 전에 오류를 반환한다. 비동기 접수도 같은 유형과 JSON-RPC 버전을 확인한다.
+- Python의 `True == 1` 때문에 불리언 취소 ID가 숫자 작업 1을 취소할 수 있었다. 잘못된 JSON-RPC 버전이나 요청 ID를 가진 메시지도 취소 알림으로 처리됐다. 디스패처와 유지보수 MCP 모두 올바른 버전·요청 ID 없는 알림·정확한 취소 ID 유형을 확인한다. 정상 취소와 원래 실행 소유권은 유지한다.
+- `params`/`arguments`의 `or {}` 처리는 빈 배열·false·0·빈 문자열을 정상 객체로 바꿨다. 이제 생략/null 호환 동작은 유지하면서 제공된 잘못된 유형은 명시한 오류로 거부한다. 매 요청에 추가 I/O·재시도·모델 호출은 없다.
+
+첫 디스패처 재현 3개는 15개 하위 조건에서 실패했다(`before-tests.txt`). 잘못된 취소 3개가 모두 활성 취소 이벤트를 설정했다. 유지보수 MCP의 별도 재현도 두 잘못된 메시지가 작업을 취소해 실패했다(`maintenance-before.txt`). 입력·도구는 격리 mock이며 실제 사용자 작업·GUI 입력·UAC·생성 요청을 실행하지 않았다.
+
+수정 후 `python -X utf8 -m unittest tools.test_claude_mcp_dispatcher_bounds tools.test_claude_mcp_lazy_dispatcher tools.test_claude_search_cache -q`는 **36개/4.387초**, `python -X utf8 -m unittest tools.test_claude_maintenance -q`는 **23개/8.036초** 통과했다. 정상 ping·정상 취소·카탈로그·검색 공유 실행·기존 취소/불확실한 전달 방어도 포함한다. 관련 Python 5개 파일의 구문 검사와 변경 파일 `git diff --check`도 통과했다. 무관한 엔진/GUI/전체 테스트와 전체 작업 속도 측정은 하지 않았다.
+
+현재 등록된 `agent-tools`가 수정한 저장소의 실행기를 사용함을 확인했다. 오래된 운영 유지보수 사본에는 취소 알림 조건만 원자적으로 병합해 무관한 바이트·BOM·줄바꿈을 보존했다. 권한/훅·MCP·관리 해시는 바뀌지 않았다. 새 MCP 연결/새 Code 대화부터 적용하며 이미 실행 중인 MCP의 재로딩은 미확인이다. 서비스 재시작·커밋·푸시는 없었다. 이 결과는 전체 저장소·실제 장시간 Desktop/GPU 작업의 무결함을 보증하지 않는다.
+
+원본·실패/통과·게시 백업/보존 증거: `C:\Users\luiny\Strata-data\diagnostics\runtime-code-audit-20261028`.

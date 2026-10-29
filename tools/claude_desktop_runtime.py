@@ -415,6 +415,22 @@ class DesktopRuntime:
         cli_id = canonical_session(event.get('session_id'))
         project = Path(event['cwd']).resolve()
         snapshot = self.system.snapshot()
+        # The hook also runs in ordinary Claude CLI sessions. Package discovery
+        # starts PowerShell, so first reject callers whose ancestry cannot contain
+        # this Desktop profile's native CLI. This is only a negative prefilter:
+        # accepted candidates still take every identity/owner check below.
+        current = int(caller_pid)
+        native_candidate = False
+        for _ in range(24):
+            row = snapshot.get(current)
+            if not row:
+                break
+            if row['exe'] and Path(row['exe']).resolve().is_relative_to(self.user_data/'claude-code'):
+                native_candidate = True
+                break
+            current = row['parent']
+        if not native_candidate:
+            raise ValueError('SessionStart hook is not owned by the running Desktop')
         desktop = self.system.main(self.system.discover(self.config.get('package_family')), snapshot)
         current = int(caller_pid); native = None
         for _ in range(24):

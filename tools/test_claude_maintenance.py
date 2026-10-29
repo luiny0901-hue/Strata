@@ -273,6 +273,80 @@ class AdapterTests(unittest.TestCase):
             result=self.call('restart_strata',{'operation_id':'one','checkpoint':'saved'},12)
             self.assertTrue(result['result']['isError']);post.assert_not_called()
 
+    def test_duplicate_active_id_is_not_dispatched_and_original_keeps_cancellation(self):
+        entered, release = threading.Event(), threading.Event()
+        owners, output = [], []
+        def call(name, args):
+            owners.append(self.tools.local.cancelled)
+            if len(owners) == 1:
+                entered.set()
+                release.wait(3)
+            return {'fixture': 'complete'}
+        with patch.object(self.tools, 'call', side_effect=call) as dispatch:
+            worker = threading.Thread(target=lambda: output.append(self.call('environment_status', rid=11)))
+            worker.start()
+            try:
+                self.assertTrue(entered.wait(2))
+                duplicate = self.call('environment_status', rid=11)
+                tracked = self.server.active.get(11)
+                self.server.handle({'jsonrpc':'2.0','method':'notifications/cancelled','params':{'requestId':11}})
+                was_cancelled = owners[0].is_set()
+            finally:
+                release.set()
+                worker.join(3)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(dispatch.call_count, 1)
+        self.assertIn('duplicate active', duplicate['error']['message'])
+        self.assertIs(tracked, owners[0])
+        self.assertTrue(was_cancelled)
+        self.assertEqual(self.server.active, {})
+        self.assertEqual(self.server.explicit_active, {})
+
+    def test_completed_id_can_be_reused_for_a_new_observation(self):
+        with patch.object(self.tools, 'call', return_value={'fixture':'complete'}) as dispatch:
+            for _ in range(2):
+                self.assertFalse(self.call('environment_status', rid=11)['result']['isError'])
+        self.assertEqual(dispatch.call_count, 2)
+
+    def test_malformed_cancel_envelope_cannot_cancel_active_work(self):
+        entered, release = threading.Event(), threading.Event()
+        state, output = {}, []
+        def call(name, args):
+            state['cancelled'] = self.tools.local.cancelled
+            state['explicit'] = self.tools.local.explicit_cancelled
+            entered.set()
+            release.wait(3)
+            return {'fixture':'complete'}
+        with patch.object(self.tools, 'call', side_effect=call):
+            worker = threading.Thread(target=lambda: output.append(self.call('environment_status', rid=11)))
+            worker.start()
+            try:
+                self.assertTrue(entered.wait(2))
+                observations = []
+                for message in (
+                    {'jsonrpc':'invalid','method':'notifications/cancelled','params':{'requestId':11}},
+                    {'jsonrpc':'2.0','id':99,'method':'notifications/cancelled','params':{'requestId':11}},
+                ):
+                    self.server.handle(message)
+                    observations.append(state['cancelled'].is_set())
+                self.server.handle({'jsonrpc':'2.0','method':'notifications/cancelled','params':{'requestId':11}})
+                valid_cancelled = state['cancelled'].is_set() and state['explicit'].is_set()
+            finally:
+                release.set()
+                worker.join(3)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(observations, [False, False])
+        self.assertTrue(valid_cancelled)
+
+    def test_invalid_request_ids_never_dispatch_or_break_cancellation(self):
+        with patch.object(self.tools, 'call', return_value={'fixture':'complete'}) as dispatch:
+            for rid in ([], {}, None, True):
+                with self.subTest(rid=rid):
+                    response = self.call('environment_status', rid=rid)
+                    self.assertIn('error', response)
+                    self.server.handle({'jsonrpc':'2.0','method':'notifications/cancelled','params':{'requestId':rid}})
+        dispatch.assert_not_called()
+
     def test_eof_cancels_before_late_worker_submission(self):
         self.server.serve(io.BytesIO(b''))
         with patch.object(self.tools,'post') as post:

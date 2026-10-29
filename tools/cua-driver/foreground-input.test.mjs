@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {deflateSync} from 'node:zlib';
-import {targetPixels,typingBudget,reviewedCaptureDimension} from './foreground-input.mjs';
+import {targetPixels,typingBudget,reviewedCaptureDimension,approvedForeground} from './foreground-input.mjs';
+import childProcess from 'node:child_process';
+import {syncBuiltinESMExports} from 'node:module';
 
 function png(change) {
   const header=Buffer.alloc(13);header.writeUInt32BE(160);header.writeUInt32BE(160,4);header[8]=8;header[9]=6;
@@ -40,4 +42,51 @@ test('foreground recapture preserves reviewed image budget in landscape and port
     assert.equal(reviewedCaptureDimension({width,height}),Math.max(width,height));
   for(const frame of [undefined,{}, {width:0,height:720},{width:1280.5,height:720},{width:Infinity,height:720},{width:7680,height:4320}])
     assert.throws(()=>reviewedCaptureDimension(frame));
+});
+
+test('signal-terminated synthetic action rejects without the three-second cleanup delay',async()=>{
+  const original=childProcess.spawn;
+  let owned;
+  childProcess.spawn=()=>{
+    owned=original(process.execPath,['-e','process.stdin.resume()'],{stdio:['pipe','pipe','pipe'],windowsHide:true});
+    owned.once('spawn',()=>setImmediate(()=>owned.kill('SIGTERM')));
+    return owned;
+  };
+  syncBuiltinESMExports();
+  try {
+    const start=performance.now();
+    await assert.rejects(approvedForeground({driver:'synthetic-only',name:'click',
+      args:{pid:123,window_id:456,x:100,y:110},
+      frame:{digest:'fixture',time:Date.now(),png:png(),width:160,height:160,bounds:{x:0,y:0,width:160,height:160}},
+      captureTools:new Set(),signal:new AbortController().signal,
+      confirmHuman:async()=>true}),/exited|pipe/i);
+    const elapsed=performance.now()-start;
+    assert.equal(owned.signalCode,'SIGTERM');
+    assert.ok(elapsed<1500,`already exited synthetic driver took ${elapsed.toFixed(1)} ms`);
+  } finally {
+    childProcess.spawn=original;
+    syncBuiltinESMExports();
+    if(owned && owned.exitCode===null && owned.signalCode===null)owned.kill();
+  }
+});
+
+test('declined or already-cancelled synthetic permission never starts a driver',async()=>{
+  const original=childProcess.spawn;
+  let starts=0;
+  childProcess.spawn=(...args)=>{starts++;return original(...args);};
+  syncBuiltinESMExports();
+  try {
+    for(const cancel of [false,true]) {
+      const controller=new AbortController();
+      await assert.rejects(approvedForeground({driver:'synthetic-missing-driver',name:'click',
+        args:{pid:123,window_id:456,x:100,y:110},
+        frame:{digest:'fixture',time:Date.now(),png:png(),width:160,height:160,bounds:{}},
+        captureTools:new Set(),signal:controller.signal,
+        confirmHuman:async()=>{if(cancel)controller.abort();return cancel;}}),/No input dispatched/);
+    }
+    assert.equal(starts,0);
+  } finally {
+    childProcess.spawn=original;
+    syncBuiltinESMExports();
+  }
 });

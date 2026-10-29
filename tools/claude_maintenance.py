@@ -494,9 +494,13 @@ class MaintenanceMcp(McpServer):
         self.active_lock = threading.Lock()
 
     def handle(self, message):
-        if isinstance(message, dict) and message.get('method') == 'notifications/cancelled':
+        if (isinstance(message, dict) and message.get('jsonrpc') == '2.0' and 'id' not in message
+                and message.get('method') == 'notifications/cancelled'):
+            params = message.get('params')
+            request_id = params.get('requestId') if isinstance(params, dict) else None
+            if type(request_id) not in (int, str):
+                return None
             with self.active_lock:
-                request_id = (message.get('params') or {}).get('requestId')
                 event = self.active.get(request_id)
                 if event:
                     event.set()
@@ -509,10 +513,15 @@ class MaintenanceMcp(McpServer):
                     self.cancelled.add(request_id)
             return None
         call = isinstance(message, dict) and message.get('method') == 'tools/call' and 'id' in message
+        if call and type(message['id']) not in (int, str):
+            return self.error(None, -32600, 'invalid request id')
         event = threading.Event()
         explicit = threading.Event()
         if call:
             with self.active_lock:
+                if message['id'] in self.active:
+                    return self.error(message['id'], -32600,
+                                      'duplicate active request id; request was not dispatched')
                 self.active[message['id']] = event
                 self.explicit_active[message['id']] = explicit
                 if message['id'] in self.cancelled or self.closing.is_set():

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import heapq
 import json
 import os
 from pathlib import Path
@@ -29,6 +30,12 @@ from tools.claude_mcp import web_search_router  # noqa: E402
 PROTOCOL = "2025-06-18"
 MAX_CATALOG_TOOLS = 4096
 MAX_TOOL_BYTES = 512 * 1024
+# A schema and a tool result have different sizes (screenshots are base64).
+MAX_RPC_BYTES = 16 * 1024 * 1024
+MAX_CATALOG_BYTES = 16 * 1024 * 1024
+MAX_QUEUED_RESPONSES = 4
+MAX_ACTIVE_CALLS = 16
+CHILD_QUEUE_TIMEOUT_SECONDS = 30
 MAX_SEARCH_RESULTS = 8
 CATALOG_PAGE_TIMEOUT_SECONDS = 30
 CATALOG_TOTAL_TIMEOUT_SECONDS = 90
@@ -99,19 +106,26 @@ class ChildServer:
         self.command = command
         self.env = env or {}
         self.process: subprocess.Popen | None = None
-        self.responses: queue.Queue[str | None] = queue.Queue()
+        self.responses: queue.Queue[dict] = queue.Queue(maxsize=MAX_QUEUED_RESPONSES)
+        self.reader_done = threading.Event()
+        self.read_error: str | None = None
         self.reader: threading.Thread | None = None
         self.lock = threading.Lock()
         self.write_lock = threading.Lock()
         self.request_id = 0
         self.protocol = PROTOCOL
         self.catalog: dict[str, dict] | None = None
+        self.catalog_lock = threading.Lock()
+        self.catalog_revision = 0
+        self.search_index: list[tuple] = []
         self.discovered: set[str] = set()
         self.interrupted = False
 
-    def _start(self):
+    def _start(self, cancel_event=None):
         if self.interrupted:
             raise DispatcherError(f"{self.name} was interrupted; inspect the operation before starting a new session")
+        if self.read_error:
+            raise DispatcherError(self.read_error)
         if self.process is not None:
             if self.process.poll() is None:
                 return
@@ -132,7 +146,7 @@ class ChildServer:
             "protocolVersion": PROTOCOL,
             "capabilities": {},
             "clientInfo": {"name": "strata-agent-tools", "version": "1.0.0"},
-        }, timeout=15)
+        }, timeout=15, cancel_event=cancel_event)
         server_protocol = initialized.get("protocolVersion")
         if isinstance(server_protocol, str):
             self.protocol = server_protocol
@@ -140,11 +154,40 @@ class ChildServer:
 
     def _read_stdout(self):
         assert self.process is not None and self.process.stdout is not None
+        stream = self.process.stdout
         try:
-            for line in self.process.stdout:
-                self.responses.put(line)
+            while True:
+                # Bound the allocation even when a broken child never sends a newline.
+                line = stream.readline(MAX_RPC_BYTES + 1)
+                if not line:
+                    break
+                if len(line) > MAX_RPC_BYTES or len(line.encode("utf-8", "replace")) > MAX_RPC_BYTES:
+                    self.read_error = f"{self.name} MCP response exceeded the size limit"
+                    break
+                try:
+                    message = json.loads(line)
+                except ValueError:
+                    continue  # non-JSON diagnostics never reach the response queue
+                if not isinstance(message, dict):
+                    continue
+                if message.get("method") == "notifications/tools/list_changed" and "id" not in message:
+                    with self.catalog_lock:
+                        self.catalog_revision += 1
+                        self.catalog = None
+                        self.search_index = []
+                        self.discovered.clear()
+                    continue
+                if "id" not in message or not ("result" in message or "error" in message):
+                    continue  # progress/log notifications do not accumulate while idle
+                try:
+                    self.responses.put_nowait(message)
+                except queue.Full:
+                    self.read_error = f"{self.name} MCP response queue overflowed"
+                    break
+        except (OSError, ValueError):
+            self.read_error = f"{self.name} MCP output could not be read"
         finally:
-            self.responses.put(None)
+            self.reader_done.set()
 
     def _notify(self, method: str, params: dict):
         assert self.process is not None and self.process.stdin is not None
@@ -164,9 +207,18 @@ class ChildServer:
                 self.process.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
                 self.process.stdin.flush()
         except (OSError, BrokenPipeError) as exc:
+            if method == "tools/call":
+                self.interrupted = True
+                raise DispatcherError(
+                    f"{self.name} MCP input closed; the operation may have completed; verify before retrying") from exc
             raise DispatcherError(f"{self.name} MCP input closed") from exc
         deadline = time.monotonic() + timeout
         while True:
+            if self.read_error:
+                if method == "tools/call":
+                    self.interrupted = True
+                    raise DispatcherError(self.read_error + "; the operation may have completed; verify before retrying")
+                raise DispatcherError(self.read_error)
             if cancel_event is not None and cancel_event.is_set():
                 self.interrupted = True
                 self._notify("notifications/cancelled", {"requestId": rid, "reason": "parent MCP request cancelled"})
@@ -180,51 +232,56 @@ class ChildServer:
                         f"{self.name} tool call timed out; the operation may have completed; verify before retrying")
                 raise DispatcherError(f"{self.name} MCP {method} timed out")
             try:
-                line = self.responses.get(timeout=min(0.1, remaining) if cancel_event is not None else remaining)
+                message = self.responses.get(timeout=min(0.1, remaining))
             except queue.Empty as exc:
-                if remaining <= 0:
+                if self.reader_done.is_set() and not self.read_error:
                     if method == "tools/call":
                         self.interrupted = True
-                        self._notify("notifications/cancelled", {"requestId": rid, "reason": "dispatcher timeout"})
                         raise DispatcherError(
-                            f"{self.name} tool call timed out; the operation may have completed; verify before retrying") from exc
-                    raise DispatcherError(f"{self.name} MCP {method} timed out") from exc
+                            f"{self.name} tool call connection closed; the operation may have completed; verify before retrying") from exc
+                    raise DispatcherError(f"{self.name} MCP process closed its output") from exc
                 continue
-            if line is None:
-                if method == "tools/call":
-                    self.interrupted = True
-                    raise DispatcherError(
-                        f"{self.name} tool call connection closed; the operation may have completed; verify before retrying")
-                raise DispatcherError(f"{self.name} MCP process closed its output")
-            if len(line.encode("utf-8", "replace")) > MAX_TOOL_BYTES:
-                raise DispatcherError(f"{self.name} MCP response exceeded the size limit")
-            try:
-                message = json.loads(line)
-            except ValueError:
-                continue  # tolerate non-JSON diagnostics without forwarding them
-            if not isinstance(message, dict) or message.get("id") != rid:
-                continue  # notifications and unrelated responses are not tool results
+            if message.get("id") != rid:
+                continue
             if "error" in message:
                 error = message.get("error")
                 reason = error.get("message") if isinstance(error, dict) else "MCP request failed"
                 raise DispatcherError(f"{self.name} MCP request failed: {str(reason)[:300]}")
             result = message.get("result")
             if not isinstance(result, dict):
+                if method == "tools/call":
+                    self.interrupted = True
+                    raise DispatcherError(
+                        f"{self.name} MCP returned an invalid response; the operation may have completed; verify before retrying")
                 raise DispatcherError(f"{self.name} MCP returned an invalid response")
             return result
 
     def _acquire(self, cancel_event):
+        if cancel_event is not None and cancel_event.is_set():
+            raise DispatcherError("request cancelled before dispatch")
+        deadline = time.monotonic() + CHILD_QUEUE_TIMEOUT_SECONDS
         while not self.lock.acquire(timeout=0.1):
             if cancel_event is not None and cancel_event.is_set():
                 raise DispatcherError("request cancelled while waiting for the MCP server")
+            if time.monotonic() >= deadline:
+                raise DispatcherError(f"{self.name} MCP server is busy; request was not dispatched; wait for the active call")
+
+    @staticmethod
+    def _prepare_search_index(catalog):
+        return [(name, tool, name.casefold(),
+                 tool.get("description", "").casefold() if isinstance(tool.get("description"), str) else "")
+                for name, tool in catalog.items()]
 
     def tools(self, cancel_event=None):
         self._acquire(cancel_event)
         try:
-            self._start()
-            if self.catalog is not None:
-                return self.catalog
+            self._start(cancel_event)
+            with self.catalog_lock:
+                if self.catalog is not None:
+                    return self.catalog
+                revision = self.catalog_revision
             catalog: dict[str, dict] = {}
+            catalog_bytes = 0
             cursor = None
             seen_cursors: set[str] = set()
             deadline = time.monotonic() + CATALOG_TOTAL_TIMEOUT_SECONDS
@@ -249,6 +306,9 @@ class ChildServer:
                     encoded = json.dumps(tool, ensure_ascii=False).encode("utf-8")
                     if len(encoded) > MAX_TOOL_BYTES:
                         continue
+                    catalog_bytes += len(encoded)
+                    if catalog_bytes > MAX_CATALOG_BYTES:
+                        raise DispatcherError(f"{self.name} MCP catalog exceeded the byte limit")
                     catalog[tool["name"]] = tool
                     if len(catalog) > MAX_CATALOG_TOOLS:
                         raise DispatcherError(f"{self.name} MCP catalog exceeded the tool limit")
@@ -263,7 +323,12 @@ class ChildServer:
                 cursor = next_cursor
             else:
                 raise DispatcherError(f"{self.name} MCP pagination exceeded the page limit")
-            self.catalog = catalog
+            index = self._prepare_search_index(catalog)
+            with self.catalog_lock:
+                if revision != self.catalog_revision:
+                    raise DispatcherError(f"{self.name} MCP catalog changed during discovery; search again")
+                self.catalog = catalog
+                self.search_index = index
             return catalog
         finally:
             self.lock.release()
@@ -271,9 +336,10 @@ class ChildServer:
     def call(self, name: str, arguments: dict, cancel_event=None):
         self._acquire(cancel_event)
         try:
-            if name not in self.discovered:
-                raise DispatcherError("search_tools must return this tool before it can be called")
-            self._start()
+            with self.catalog_lock:
+                if name not in self.discovered:
+                    raise DispatcherError("search_tools must return this tool before it can be called")
+            self._start(cancel_event)
             return self._request("tools/call", {"name": name, "arguments": arguments}, timeout=600,
                                  cancel_event=cancel_event)
         finally:
@@ -338,24 +404,26 @@ def search_catalog(server: ChildServer, query: str, limit: int = 5, cancel_event
             terms.extend(_words(english))
     terms = list(dict.fromkeys(terms))
     needle = query.casefold().strip()
-    ranked = []
-    for name, tool in catalog.items():
-        description = tool.get("description", "")
-        if not isinstance(description, str):
-            description = ""
-        name_text = name.casefold()
-        description_text = description.casefold()
-        searchable = name_text + " " + description_text
-        score = sum(3 for word in terms if word in name_text) + sum(1 for word in terms if word in description_text)
-        if needle in name_text:
-            score += 8
-        elif needle in description_text:
-            score += 3
-        if score:
-            ranked.append((score, name, tool))
-    ranked.sort(key=lambda row: (-row[0], row[1]))
-    results = [tool for _score, _name, tool in ranked[:limit]]
-    server.discovered.update(tool["name"] for tool in results)
+    with server.catalog_lock:
+        if server.catalog is not catalog:
+            raise DispatcherError(f"{server.name} MCP catalog changed; search again")
+        index = server.search_index
+
+    def matches():
+        for name, tool, name_text, description_text in index:
+            score = sum(3 for word in terms if word in name_text) + sum(1 for word in terms if word in description_text)
+            if needle in name_text:
+                score += 8
+            elif needle in description_text:
+                score += 3
+            if score:
+                yield score, name, tool
+
+    results = [tool for _score, _name, tool in heapq.nsmallest(limit, matches(), key=lambda row: (-row[0], row[1]))]
+    with server.catalog_lock:
+        if server.catalog is not catalog:
+            raise DispatcherError(f"{server.name} MCP catalog changed; search again")
+        server.discovered.update(tool["name"] for tool in results)
     return results
 
 
@@ -389,10 +457,14 @@ class Dispatcher:
         if not isinstance(message, dict) or message.get("jsonrpc") != "2.0" or not isinstance(message.get("method"), str):
             return self.error(message.get("id") if isinstance(message, dict) else None, -32600, "invalid request")
         rid = message.get("id")
+        if "id" in message and type(rid) not in (str, int):
+            return self.error(None, -32600, "invalid request id")
         if rid is None:
             return None
         method = message["method"]
-        params = message.get("params") or {}
+        params = message.get("params")
+        if params is None:
+            params = {}
         if not isinstance(params, dict):
             return self.error(rid, -32602, "params must be an object")
         if method == "initialize":
@@ -415,7 +487,9 @@ class Dispatcher:
             return self.response(rid, {"tools": self.tool_definitions()})
         if method == "tools/call":
             name = params.get("name")
-            args = params.get("arguments") or {}
+            args = params.get("arguments")
+            if args is None:
+                args = {}
             if not isinstance(args, dict):
                 return self.error(rid, -32602, "arguments must be an object")
             try:
@@ -484,19 +558,30 @@ class Dispatcher:
                 send(self.error(None, -32700, "parse error"))
                 continue
             else:
-                if (isinstance(message, dict) and message.get("method") == "notifications/cancelled"
+                if (isinstance(message, dict) and message.get("jsonrpc") == "2.0" and "id" not in message
+                        and message.get("method") == "notifications/cancelled"
                         and isinstance(message.get("params"), dict)):
                     request_id = message["params"].get("requestId")
                     with pending_lock:
-                        cancellation = pending.get(request_id) if isinstance(request_id, (str, int)) else None
+                        cancellation = pending.get(request_id) if type(request_id) in (str, int) else None
                     if cancellation is not None:
                         cancellation.set()
                     continue
-                if (isinstance(message, dict) and message.get("method") == "tools/call"
-                        and "id" in message and isinstance(message.get("id"), (str, int))):
+                if (isinstance(message, dict) and message.get("jsonrpc") == "2.0"
+                        and message.get("method") == "tools/call"
+                        and "id" in message and type(message.get("id")) in (str, int)):
                     cancellation = threading.Event()
                     with pending_lock:
-                        pending[message["id"]] = cancellation
+                        if message["id"] in pending:
+                            rejection = "duplicate active request id; request was not dispatched"
+                        elif len(pending) >= MAX_ACTIVE_CALLS:
+                            rejection = "MCP dispatcher is busy; request was not dispatched; wait for active calls"
+                        else:
+                            rejection = None
+                            pending[message["id"]] = cancellation
+                    if rejection:
+                        send(self.error(message["id"], -32600 if "duplicate" in rejection else -32000, rejection))
+                        continue
                     worker = threading.Thread(target=run_call, args=(message, cancellation), daemon=True)
                     worker.start()
                     workers.append(worker)

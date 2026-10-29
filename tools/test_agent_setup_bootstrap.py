@@ -47,6 +47,21 @@ class LinuxProfileTests(unittest.TestCase):
             self.assertEqual(profile["args"][profile["args"].index("--pack") + 1], str(data / "packs/unsloth-ud-iq4_xs"))
             self.assertEqual(Path(profile["exe"]).name, "strata")
 
+    def test_saved_server_gpu_is_used_but_explicit_gpu_takes_precedence(self):
+        saved = self.home / "strata/server-gpu"
+        saved.parent.mkdir()
+        saved.write_text("2\n", encoding="utf-8")
+        profile = self.home / f"strata/profiles/{linux.PROFILE_STEM}-on-linux.json"
+        self.assertEqual(self.call("prepare"), 0)
+        self.assertEqual(json.loads(profile.read_text(encoding="utf-8"))["gpu"], 2)
+        self.assertEqual(self.call("prepare", "--gpu", "3"), 0)
+        self.assertEqual(json.loads(profile.read_text(encoding="utf-8"))["gpu"], 3)
+        before = profile.read_bytes()
+        saved.write_text("invalid", encoding="utf-8")
+        with self.assertRaises(SystemExit):
+            self.call("prepare")
+        self.assertEqual(profile.read_bytes(), before)
+
     def test_malformed_key_is_not_replaced(self):
         path = self.home / "strata/STRATA_API_KEY"
         path.parent.mkdir()
@@ -104,6 +119,16 @@ class LinuxBootstrapTests(unittest.TestCase):
             self.assertIn("pip\ninstall\n-r", calls)
             self.assertIn("prepare\n--python", calls)
             self.assertFalse((repo / ".venv").exists())
+
+    @unittest.skipUnless(BASH and Path(BASH).is_file(), "Bash not installed")
+    def test_client_launchers_never_ignore_invalid_explicit_python(self):
+        for relative in ('setup-claude-opencodex.sh', 'run-claude-opencodex.sh'):
+            with self.subTest(path=relative):
+                result = subprocess.run([BASH, str(ROOT/relative), 'doctor'],
+                    env={**os.environ, 'STRATA_CLAUDE_PYTHON': '/strata-nonexistent-python'},
+                    capture_output=True, timeout=10)
+                self.assertEqual(result.returncode, 127, result.stderr.decode(errors='replace'))
+                self.assertIn(b'STRATA_CLAUDE_PYTHON', result.stderr)
 
     @unittest.skipUnless(BASH and Path(BASH).is_file(), "Bash not installed")
     def test_active_shell_launchers_parse(self):

@@ -27,3 +27,7 @@
 일반 Vision 설정의 기본값은 꺼짐이다. 사용자가 요청한 ON/OFF launcher 전용 profile template에는 source_cache=true를 명시했다. 런처가 다음 서버 실행에서 profile을 다시 렌더링할 때 적용된다. 실행 중 서버는 재시작하지 않았다.
 
 이미지 해상도/토큰 수/추론 강도를 낮추지 않았다. 실제 Rider 첨부→비전 인코딩→최종 답변, 최초 큰 이미지, 다중 이미지, 네트워크 업로드 시간은 이번에 실측하지 않았다. 실제 서버에 전체 병목이 없다고 주장하지 않는다.
+
+## 2026-10-27 실행 경로 누락 보완
+
+실제 NVFP4 fork에는 위 기능이 없어진 상태였고 프로필 값만 남아 있었다. 알려진 Vision 구간만 적용하는 설치기를 ON/OFF BAT에 연결하고 현재 운영 fork에도 적용했다. 실제 CPU 인코더의 임베딩 동등성, 직접 Strata와 OpenCodex Messages 요청을 확인했다. 세부 측정과 실패 시도는 [CLAUDE_VISION_LATENCY_20261027_KO.md](CLAUDE_VISION_LATENCY_20261027_KO.md)를 확인한다.

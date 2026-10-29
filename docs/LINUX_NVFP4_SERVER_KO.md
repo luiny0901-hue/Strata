@@ -3,6 +3,10 @@
 상태: Linux 서버 준비·실행 절차를 설명합니다. Linux 성능, 포크 바이너리 호환성,
 실제 원격 연결은 미검증입니다.
 
+## 통합 설치
+
+`bash install-strata-agent.sh --role server`로 Python 준비·서버 의존성·GPU 선택·복구 자료 확인·기존 ON/OFF 프로필 준비를 진행할 수 있습니다. Linux 의존성 단계는 아래 기존 부트스트랩을 재사용합니다. 모델·Pack·동일 포크 Linux 바이너리는 백업을 복원하며, 누락 파일이나 드라이버·재부팅 단계는 대기로 남습니다. [통합 설치 안내](INTEGRATED_INSTALL_KO.md)를 참고하세요.
+
 ## 서버 파일 준비
 
 `SETUP-LINUX-SERVER.sh`는 Python/venv/pip와 저장소의 Python 의존성을 자동 준비합니다.
@@ -69,6 +73,6 @@ API 키는 `${XDG_CONFIG_HOME:-$HOME/.config}/strata/STRATA_API_KEY`에 저장�
 
 ## Claude Desktop Code 클라이언트
 
-Claude Desktop Code는 Strata 서버와 별도의 클라이언트 PC에서 실행할 수 있습니다. 서버 주소와 API 키를 OpenCodex의 Strata 공급자에 설정하고, Claude Desktop Code 연결은 [Claude 연결 안내](CLAUDE_OPENCODEX_KO.md)에 따릅니다. CUA Driver·REA는 화면과 파일을 실제로 다루는 클라이언트 PC에서 준비합니다. Linux 서버에 GUI용 CUA를 설치하지 않습니다.
+Claude Desktop Code는 Strata 서버와 별도의 클라이언트 PC에서 실행할 수 있습니다. 권장 외부 연결은 접속 PC에서 OpenCodex를 실행하고 SSH 터널로 Linux 서버의 127.0.0.1:8080을 접속 PC의 127.0.0.1:18080에 연결하는 방식입니다. OpenCodex의 Strata 공급자에는 http://127.0.0.1:18080/v1과 서버 API 키를 설정합니다. 터널·클라이언트 준비는 [Claude 연결 안내](CLAUDE_OPENCODEX_KO.md#새-pc재설치외부-pc)를 따릅니다. 위 LAN 직접 바인딩 예시는 별도의 서버 운영 선택이며, 현재 로컬 전용 유지보수 진단과 혼용하지 않습니다. CUA Driver·REA는 화면과 파일을 실제로 다루는 클라이언트 PC에서 준비합니다. Linux 서버에 GUI용 CUA를 설치하지 않습니다.
 
 이 문서는 Linux 서버의 프로필 준비와 실행만 설명하며 외부 PC·Apple Silicon Mac에서의 Claude Desktop Code 연결을 검증했다는 뜻은 아닙니다.

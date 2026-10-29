@@ -54,7 +54,11 @@ def render_profile(
     repository_root = repository_root.resolve()
     strata_root = strata_root.resolve()
     data_root = data_root.resolve()
-    fork_root = (strata_root / FORK_RELATIVE).resolve()
+    if __package__:
+        from .strata_fork_update import selected_fork
+    else:
+        from strata_fork_update import selected_fork
+    fork_root = selected_fork(strata_root).resolve()
     model_root = data_root / "models" / "unsloth-UD-IQ4_XS"
     pack_root = data_root / "packs" / "unsloth-ud-iq4_xs"
     replacements = {
@@ -66,6 +70,12 @@ def render_profile(
     }
     template = json.loads(_template_path(repository_root, mode).read_text(encoding="utf-8"))
     profile = _replace_tokens(template, replacements)
+    gpu_override = os.environ.get("STRATA_SERVER_GPU")
+    if gpu_override is not None:
+        gpu = int(gpu_override)
+        if gpu < 0:
+            raise ValueError("STRATA_SERVER_GPU must be a nonnegative GPU index")
+        profile["gpu"] = gpu
     serialized = json.dumps(profile, ensure_ascii=False, indent=2) + "\n"
     unresolved = (
         "@FORK_ROOT@",
@@ -178,6 +188,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
 
+    selected = commands.add_parser("fork-root", help="resolve the shared active NVFP4 bundle")
+    selected.add_argument("--strata-root", type=Path, required=True)
+
     render = commands.add_parser("render-profile", help="render one ON/OFF runtime profile")
     render.add_argument("--mode", choices=("on", "off"), required=True)
     render.add_argument("--strata-root", type=Path, required=True)
@@ -198,7 +211,13 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     try:
-        if args.command == "render-profile":
+        if args.command == "fork-root":
+            if __package__:
+                from .strata_fork_update import selected_fork
+            else:
+                from strata_fork_update import selected_fork
+            print(selected_fork(args.strata_root.resolve()))
+        elif args.command == "render-profile":
             path = render_profile(
                 args.strata_root.resolve(),
                 args.mode,

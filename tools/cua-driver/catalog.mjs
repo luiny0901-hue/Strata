@@ -54,7 +54,7 @@ export async function readCatalog(driver, args, allowed, { timeoutMs = 20000 } =
     lines.close();
     child.stdin.end();
     await new Promise((resolve) => {
-      if (child.exitCode !== null || !child.pid) { resolve(); return; }
+      if (child.exitCode !== null || child.signalCode !== null || !child.pid) { resolve(); return; }
       const timer = setTimeout(() => { child.kill(); resolve(); }, 3000);
       child.once("exit", () => { clearTimeout(timer); resolve(); });
     });
