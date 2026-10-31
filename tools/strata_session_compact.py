@@ -96,6 +96,15 @@ class StrataClient:
     def health(self) -> dict:
         return self._request("/health", None, 15)
 
+    def is_idle(self) -> bool:
+        """True when the server reports no request in flight; an unknown state counts as idle."""
+        try:
+            status = self._request("/v1/status", None, 10)
+        except (OSError, ValueError, urllib.error.URLError):
+            return True
+        activity = status.get("activity") or {}
+        return int(activity.get("in_flight", 0)) == 0
+
     def count_tokens(self, model: str, text: str) -> int:
         result = self._request(
             "/v1/messages/count_tokens",
@@ -314,10 +323,26 @@ def append_compact(path: Path, summary: str, template: dict, pre_tokens: int,
     return str(backup)
 
 
+def _file_stamp(path: Path) -> tuple[int, int]:
+    info = path.stat()
+    return info.st_mtime_ns, info.st_size
+
+
+def wait_until_idle(client: StrataClient, wait_seconds: int, poll_seconds: int = 5) -> bool:
+    """Give the user's own requests priority: work starts only during a quiet gap."""
+    deadline = time.monotonic() + wait_seconds
+    while not client.is_idle():
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(min(poll_seconds, max(0.5, deadline - time.monotonic())))
+    return True
+
+
 def compact_session(path: Path, client: StrataClient, model: str, window: int,
                     reserve: int, chunk_tokens: int, dry_run: bool,
                     backup_root: Path) -> SessionReport:
     report = SessionReport(path=path, session_id=path.stem)
+    stamp = _file_stamp(path)
     active, last_message = active_records(path)
     chunks = build_chunks(active, chunk_tokens)
     if not chunks:
@@ -352,6 +377,11 @@ def compact_session(path: Path, client: StrataClient, model: str, window: int,
         report.action = "would-compact"
         report.reason = "dry run"
         return report
+    if _file_stamp(path) != stamp:
+        # The session was resumed while its summary was being built; appending
+        # now would fork the record chain, so leave it for a later run.
+        report.reason = "session changed during compaction; left alone"
+        return report
     report.backup = append_compact(
         path, summary, _template_fields(last_message), estimate, report.summary_tokens,
         int((time.monotonic() - started) * 1000), backup_root)
@@ -372,6 +402,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="tokens left free under the window for the session's next request")
     parser.add_argument("--chunk-tokens", type=int, default=DEFAULT_CHUNK_TOKENS)
     parser.add_argument("--max-sessions", type=int, default=10)
+    parser.add_argument("--wait-idle-seconds", type=int, default=900,
+                        help="wait this long for a quiet server per session before leaving it alone")
     parser.add_argument("--dry-run", action="store_true", help="report only; this is also safe to rerun")
     parser.add_argument("--apply", action="store_true", help="append compact boundaries (without this, dry-run)")
     parser.add_argument("--backup-dir", type=Path)
@@ -408,6 +440,10 @@ def main(argv: list[str] | None = None) -> int:
 
     reports: list[SessionReport] = []
     for path in candidates:
+        if not wait_until_idle(client, args.wait_idle_seconds):
+            reports.append(SessionReport(path=path, session_id=path.stem,
+                                         reason=f"server busy for {args.wait_idle_seconds}s; left alone"))
+            continue
         try:
             reports.append(compact_session(path, client, model, window, args.reserve,
                                            args.chunk_tokens, dry_run, backup_root))

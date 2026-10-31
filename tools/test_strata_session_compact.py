@@ -23,6 +23,7 @@ from tools.strata_session_compact import (
     discover_sessions,
     main,
     now_iso,
+    wait_until_idle,
 )
 
 
@@ -52,10 +53,14 @@ class FakeClient:
     def __init__(self, window: int = 100_000, model: str = "test-model") -> None:
         self.window = window
         self.model = model
+        self.idle = True
         self.summarize_calls: list[tuple[str, str]] = []
 
     def health(self) -> dict:
         return {"status": "ok", "loaded": True, "max_context": self.window, "model": self.model}
+
+    def is_idle(self) -> bool:
+        return self.idle
 
     def count_tokens(self, model: str, text: str) -> int:
         return max(1, len(text) // 4)
@@ -156,6 +161,32 @@ class SessionFileTests(unittest.TestCase):
         self.assertIn(path, discover_sessions(self.projects, 60, now))
         (idle_dir / "other.jsonl").write_text("{}", encoding="utf-8")
         self.assertEqual(discover_sessions(self.projects, 60, now), [])
+
+    def test_session_resumed_midrun_is_left_alone(self) -> None:
+        path = self.make_session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", 200)
+        client = FakeClient()
+        original = client.summarize
+
+        def summarizing_change(model: str, carry: str, excerpt: str, instruction: str) -> str:
+            result = original(model, carry, excerpt, instruction)
+            # Simulate the user resuming this session while its summary is built.
+            with path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps({"type": "user", "message": {"role": "user", "content": "resumed"}}) + "\n")
+            return result
+
+        client.summarize = summarizing_change
+        report = compact_session(path, client, client.model, client.window, 49_152, 4_000, False, self.root / "b")
+        self.assertEqual(report.action, "skip")
+        self.assertIn("changed during compaction", report.reason)
+        text = path.read_text(encoding="utf-8")
+        self.assertNotIn("compact_boundary", text)
+        self.assertIn("resumed", text)
+
+    def test_wait_until_idle_checks_once_after_the_deadline(self) -> None:
+        client = FakeClient()
+        self.assertTrue(wait_until_idle(client, 0))
+        client.idle = False
+        self.assertFalse(wait_until_idle(client, 0))
 
     def test_idle_minutes_zero_includes_recently_written_projects(self) -> None:
         path = self.make_session("88888888-8888-4888-8888-888888888888", 10)
