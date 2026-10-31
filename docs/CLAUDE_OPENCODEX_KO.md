@@ -37,6 +37,8 @@ Claude Code 기본 모델은 `strata/qwen3.8-flash-next-unsloth-ud-iq4_xs`입니
 
 Claude 설정을 마친 뒤 `setup-claude-opencodex.bat clients`(Linux/macOS: `./setup-claude-opencodex.sh clients`)로 Strata 모델 정보·Codex 지연 MCP·공통 지침을 연결합니다. `clients --check`는 저장된 설정 차이만 읽습니다. 모델 API 정보와 각 앱의 압축·권한·MCP는 적용 범위가 다릅니다. [공통 설정과 실제 확인 범위](STRATA_CLIENT_SETTINGS_20261028_KO.md)를 따르세요.
 
+GUI 화면 조작이 필요한 경우는 네 경로(터미널 CLI·Desktop Code·Codex CLI·ChatGPT/Codex Desktop) 모두 agent-tools로 얻는 CUA만 사용합니다. Codex·ChatGPT Desktop이 자체 제공하는 Computer Use는 쓰지 않도록 `~/.codex/config.toml`의 OpenAI 번들 computer-use 플러그인 두 개를 껐고, Codex 공통 지침(`~/.codex/AGENTS.md`, `strata_client_settings.py` 생성)에도 사용 금지 문장을 넣었습니다. 설정 변경은 새로 시작하는 실행부터 적용되므로 데스크톱 앱은 재실행이 필요합니다. 2026-11-01에 `codex exec`로 agent-tools 검색→호출이 `list_windows`(창 122개)까지 도달하는 것을 확인했습니다.
+
 ## 새 PC·재설치·외부 PC
 
 ### 구성과 확인 범위

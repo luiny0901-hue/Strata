@@ -404,6 +404,7 @@ def _codex_guide():
         f'`{(root/"examples/claude/professional").as_posix()}`에서 해당 대상 하나만 읽는다.\n\n'
         +scope_policy(root)+'\n\n'+validation_policy(root)+'\n\n'+
         'GUI·역분석·웹 검색이 필요할 때만 agent-tools의 검색으로 필요한 하위 도구를 찾고 반환된 정확한 이름·스키마로 호출한다. '
+        'GUI 화면 조작은 항상 agent-tools를 통해 얻는 CUA로 수행하고 클라이언트가 내장한 Computer Use 도구는 사용하지 않는다. '
         +CUA_INPUT_POLICY+' '+
         'MCP 등록은 도구 실행 성공이나 승인·현재 세션 연결을 증명하지 않는다.\n'+GUIDE_END+'\n')
 
