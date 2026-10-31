@@ -27,6 +27,8 @@ Codex는 Responses의 `reasoning.effort`를 보낸다. OpenCodex의 일반 Anthr
 
 Max는 현재 Strata에서 별도 native 단계가 아니며 high와 같은 내부 xhigh·8,192 상한으로 처리된다. Ultra는 OpenCodex가 자동 위임용으로 표시하는 모드이고 Codex 클라이언트는 wire에서 max로 변환한다. 실제 자동 위임 실행은 이번에 시험하지 않았다. 따라서 Max·Ultra를 더 깊은 별도 로컬 모델 추론으로 설명하면 안 된다. 세 native 값 이외의 합성 표시를 완전히 숨기는 변경은 하지 않았다.
 
+**2026-10-31 갱신**: 사용자 요청으로 Strata 공급자에 `modelSuppressSyntheticMax=true`(모델 키 `qwen3.8-flash-next-unsloth-ud-iq4_xs`)를 관리 API `POST /api/providers`로 적용했다. 카탈로그는 즉시 재생성되어 Strata 행은 `low/medium/high/ultra`가 됐고 Max 선택지는 사라졌다. 원본 공급자 백업: `C:/Users/luiny/.claude/backups/strata-provider-pq_a0dwm.json`. 같은 변경 시각 다른 모델 행의 사다리는 그대로였다(모델별 표시는 카탈로그가 이미 유지). Ultra는 2.92.0에서 조건 없이 추가되어 남으며 끌 설정이 없다. Codex 보통 왕복은 재실행해 `ok`를 확인했고, `max`로 하위 작업을 여는 경로는 미확인이다. Codex 데스크톱·클라이언트는 시작 시 카탈로그를 읽어 재시작 후 반영된다.
+
 ## 검증·실행 기록
 
 - 설치된 `createAnthropicAdapter.buildRequest()`를 실제로 호출해 네트워크 없이 wire body/header를 수집했다. 알려진 fork의 실제 `effort_kwargs`·`budget_effort`와 기존/수정 helper를 대조해 low/medium/high의 기존 medium/xhigh/xhigh, 수정 low/medium/xhigh 및 3072/4096/8192 상한을 확인했다.
