@@ -1,5 +1,7 @@
 # 처음 사용하는 분께
 
+기존 ON/OFF 실행기를 유지하면서 별도 1M 실행기를 쓰려면 [1M 컨텍스트 안내](docs/STRATA_1M_CONTEXT_KO.md)를 확인합니다. 전환 후 새 클라이언트 세션을 엽니다.
+
 ## 처음 설치·재설치: 통합 설치기
 
 - Windows: **`INSTALL-STRATA-AGENT.bat`**를 실행합니다. 접속 PC 또는 NVIDIA 서버 복구·준비를 선택합니다.

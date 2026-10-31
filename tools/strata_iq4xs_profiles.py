@@ -24,6 +24,7 @@ SHARD_NAMES = (
     "Qwen3.8-Flash-Next-UD-IQ4_XS-00003-of-00003.gguf",
 )
 DEFAULT_MANIFEST = "docs/reports/2026-10-17-iq4xs-artifact-manifest.json"
+CONTEXT_SIZES = (262144, 1048576)
 
 
 def _template_path(repository_root: Path, mode: str) -> Path:
@@ -48,9 +49,12 @@ def render_profile(
     strata_root: Path,
     data_root: Path,
     output_path: Path,
+    context: int = 262144,
 ) -> Path:
     if mode not in ("on", "off"):
         raise ValueError("mode must be 'on' or 'off'")
+    if type(context) is not int or context not in CONTEXT_SIZES:
+        raise ValueError("context must be 262144 or 1048576")
     repository_root = repository_root.resolve()
     strata_root = strata_root.resolve()
     data_root = data_root.resolve()
@@ -70,6 +74,13 @@ def render_profile(
     }
     template = json.loads(_template_path(repository_root, mode).read_text(encoding="utf-8"))
     profile = _replace_tokens(template, replacements)
+    if context != 262144:
+        args = profile["args"]
+        args[args.index("--max-context") + 1] = str(context)
+        # Keep trained rotations for short dialogs and extend only when needed.
+        args.extend(["--rope-scaling", "dynamic", "--rope-scale", "4"])
+        profile["rope_auto"] = True
+        profile["log"] = str(Path(profile["log"]).with_name(Path(profile["log"]).stem + "-1m.log"))
     gpu_override = os.environ.get("STRATA_SERVER_GPU")
     if gpu_override is not None:
         gpu = int(gpu_override)
@@ -100,7 +111,6 @@ def validate_templates(repository_root: Path) -> list[str]:
         profile = json.loads(_template_path(repository_root, mode).read_text(encoding="utf-8"))
         args = profile.get("args", [])
         assert profile.get("uncensored") is expected, f"{mode}: incorrect uncensored default"
-
         assert bool(profile.get("ban_cjk_tokens")) is (mode == "on"), f"{mode}: wrong CJK ban default"
         assert profile.get("model_name") == MODEL_KEY, f"{mode}: wrong model id"
         assert profile.get("port") == 8080 and profile.get("gpu") == 1, f"{mode}: wrong endpoint/GPU"
@@ -114,8 +124,13 @@ def validate_templates(repository_root: Path) -> list[str]:
         assert args[args.index("--pack") + 1] == "@PACK_ROOT@"
         assert args[args.index("--spec") + 1] == "4", f"{mode}: wrong MTP depth"
         assert args[args.index("--spec-min-p") + 1] == "0.5", f"{mode}: wrong MTP threshold"
-        assert args[args.index("--vram-reserve-mib") + 1] == "448"
-        assert args[args.index("--prefill") + 1] == ("auto:16384" if mode == "on" else "auto")
+        # On the 3090 Ti box 448 left 357 MiB of VRAM free at load and prefill died
+        # of an illegal memory access under WDDM paging (#2065). Free at load equals
+        # 357 + (reserve - 448); a 2026-11-01 sweep crashed at 549 MiB free and
+        # passed 2/2 at 679 (this value), accepting the engine's below-1024 note at
+        # request start. Measured details: docs/STRATA_1M_CONTEXT_KO.md.
+        assert args[args.index("--vram-reserve-mib") + 1] == "768"
+        assert args[args.index("--prefill") + 1] == "auto:8192"
         for option, expected_cache in (
             ("--conversation-cache-mib", "8192"),
             ("--conversation-cache-slots", "2"),
@@ -198,6 +213,7 @@ def main(argv: list[str] | None = None) -> int:
     render.add_argument("--strata-root", type=Path, required=True)
     render.add_argument("--data-root", type=Path, default=Path.home() / "Strata-data")
     render.add_argument("--output", type=Path, required=True)
+    render.add_argument("--context", type=int, choices=CONTEXT_SIZES, default=262144)
 
     validate = commands.add_parser("validate-templates", help="check the portable ON/OFF templates")
     validate.add_argument("--repository-root", type=Path, default=Path(__file__).resolve().parents[1])
@@ -226,6 +242,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.strata_root,
                 args.data_root,
                 args.output,
+                args.context,
             )
             print(path)
         elif args.command == "validate-templates":

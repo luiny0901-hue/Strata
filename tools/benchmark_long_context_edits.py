@@ -63,22 +63,24 @@ def main():
     parser.add_argument('--effort',choices=['none','low','medium','high'],default='none')
     parser.add_argument('--target',type=int,default=259500)
     parser.add_argument('--max-output',type=int,default=512)
+    parser.add_argument('--context',type=int,choices=(262144,1048576),default=262144)
+    parser.add_argument('--timeout',type=int,default=240,help='Per-request deadline in seconds')
     parser.add_argument('--stage-efforts',nargs=3,choices=['none','low','medium','high'],help='Optional effort for implementation and each of the two same-conversation edits')
     args=parser.parse_args()
-    if args.target<4096 or args.max_output<128 or args.target+args.max_output+512>262144:
-        parser.error('Target must leave output and tool-schema headroom within 262144')
+    if args.target<4096 or args.max_output<128 or args.target+args.max_output+512>args.context or not 1<=args.timeout<=1200:
+        parser.error('Target must leave output/tool-schema headroom within the selected context; timeout 1..1200')
     root=args.output.resolve();root.mkdir(parents=True,exist_ok=False)
     base,headers=strata_upstream(args.home)
     model=gateway(args.home)[1].split('/',1)[1]
     headers={**headers,'Content-Type':'application/json'}
     def api(route,body=None):
         request=Request(base+route,data=None if body is None else json.dumps(body).encode(),headers=headers)
-        with urlopen(request,timeout=240) as response:return json.load(response)
+        with urlopen(request,timeout=args.timeout) as response:return json.load(response)
     def idle():
         slots=api('/slots')
         if not slots or any(s.get('is_processing') is not False for s in slots):raise RuntimeError('Server not idle')
     health=api('/health')
-    if health.get('max_context')!=262144:raise RuntimeError('Expected 262144 context server')
+    if health.get('max_context')!=args.context:raise RuntimeError('Server context differs from selected benchmark context')
     (root/'identity.json').write_text(json.dumps({'health':health,'model':model,'mode':'direct Strata API, scoped tool loop; excludes Desktop UI','reasoning':args.stage_efforts or args.effort,'temperature':0,'target':args.target,'max_output':args.max_output},indent=2),encoding='utf-8')
     rows=1000
     for _ in range(5):
@@ -89,7 +91,7 @@ def main():
     (root/'history.txt').write_text(history,encoding='utf-8')
     print(json.dumps({'sizing_tokens_without_tool_schema':count,'lines':rows}),flush=True)
     messages=[{'role':'system','content':SYSTEM},{'role':'user','content':history+'\n'+TASKS[0]}]
-    report={'context_limit':262144,'effort':args.effort,'stage_efforts':args.stage_efforts,'max_output':args.max_output,'sizing_tokens_without_tool_schema':count,'stages':[]}
+    report={'context_limit':args.context,'effort':args.effort,'stage_efforts':args.stage_efforts,'max_output':args.max_output,'sizing_tokens_without_tool_schema':count,'stages':[]}
     def persist():
         (root/'results.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
     for stage in range(3):
@@ -104,7 +106,7 @@ def main():
                 payload=json.dumps({'model':model,'messages':messages,'tools':[TOOL],'temperature':0,'reasoning_effort':effort,'max_tokens':args.max_output,'stream':False}).encode()
                 preparation=time.perf_counter()-prep
                 start=time.perf_counter()
-                with urlopen(Request(base+'/v1/chat/completions',data=payload,headers=headers),timeout=240) as response:result=json.load(response)
+                with urlopen(Request(base+'/v1/chat/completions',data=payload,headers=headers),timeout=args.timeout) as response:result=json.load(response)
                 elapsed=time.perf_counter()-start
                 message=result['choices'][0]['message'];finish=result['choices'][0].get('finish_reason')
                 call={'round':round_index+1,'serialization_seconds':preparation,'http_seconds':elapsed,'usage':result.get('usage'),'timings':result.get('timings'),'finish_reason':finish,'message':message}

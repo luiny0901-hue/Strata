@@ -1,5 +1,12 @@
 @echo off
 setlocal
+set "CONTEXT_TOKENS=262144"
+set "CONTEXT_SUFFIX="
+if defined STRATA_IQ4XS_CONTEXT if not "%STRATA_IQ4XS_CONTEXT%"=="1048576" (echo Unsupported context override.& exit /b 30)
+if "%STRATA_IQ4XS_CONTEXT%"=="1048576" (
+    set "CONTEXT_TOKENS=1048576"
+    set "CONTEXT_SUFFIX=-1m"
+)
 title Strata NVFP4 fork - Unsloth UD-IQ4_XS - uncensored ON
 set "STRATA_ROOT=%~dp0"
 set "DATA_ROOT=%USERPROFILE%\Strata-data"
@@ -9,11 +16,17 @@ set "MODEL_DIR=%DATA_ROOT%\models\unsloth-UD-IQ4_XS"
 set "PACK_DIR=%DATA_ROOT%\packs\unsloth-ud-iq4_xs"
 set "MTP_DIR=%DATA_ROOT%\mtp\rt"
 set "PROFILE_DIR=%LOCALAPPDATA%\Strata\profiles"
-set "PROFILE=%PROFILE_DIR%\strata-unsloth-ud-iq4_xs-nvfp4fork-uncensored-on.json"
+set "PROFILE=%PROFILE_DIR%\strata-unsloth-ud-iq4_xs-nvfp4fork-uncensored-on%CONTEXT_SUFFIX%.json"
 set "PYTHON=%STRATA_ROOT%.venv\Scripts\python.exe"
 set "PYTHONPATH=%STRATA_ROOT%tools;%PYTHONPATH%"
 set "VECTOR=%FORK_ROOT%\data\uncensor\qwen-nvfp4-gptq-uncensored.gguf"
 set "API_KEY_FILE=%USERPROFILE%\.config\strata\STRATA_API_KEY"
+
+rem Persist the existing opt-in so returning to the 262K launcher also syncs clients.
+if "%CONTEXT_TOKENS%"=="1048576" if not defined STRATA_SUPERVISOR_CHILD (
+    "%PYTHON%" "%STRATA_ROOT%tools\configure_strata_managed_launchers.py" --managed-launchers
+    if errorlevel 1 (echo Could not enable managed context switching.& exit /b 31)
+)
 
 if "%~1"=="" if not defined STRATA_SUPERVISOR_CHILD if exist "%USERPROFILE%\.config\strata\server-control\managed-launchers.enabled" (
     call "%~f0" --managed
@@ -21,7 +34,7 @@ if "%~1"=="" if not defined STRATA_SUPERVISOR_CHILD if exist "%USERPROFILE%\.con
 )
 
 if /i "%~1"=="--managed" if not defined STRATA_SUPERVISOR_CHILD (
-    "%PYTHON%" "%STRATA_ROOT%tools\strata_server_supervisor.py" --launcher "%~f0" --state-dir "%DATA_ROOT%\supervisor" --api-key-file "%API_KEY_FILE%" --token-file "%USERPROFILE%\.config\strata\server-control\restart-control.key" --fork-update-root "%STRATA_ROOT%." --console-log --desktop-restart-config "%USERPROFILE%\.config\strata\server-control\desktop-restart.json"
+    "%PYTHON%" "%STRATA_ROOT%tools\strata_server_supervisor.py" --launcher "%~f0" --state-dir "%DATA_ROOT%\supervisor" --api-key-file "%API_KEY_FILE%" --token-file "%USERPROFILE%\.config\strata\server-control\restart-control.key" --fork-update-root "%STRATA_ROOT%." --sync-client-context --console-log --desktop-restart-config "%USERPROFILE%\.config\strata\server-control\desktop-restart.json"
     if errorlevel 1 (
         echo Managed Strata failed. See the error above and %DATA_ROOT%\supervisor\server.log
         pause
@@ -74,7 +87,7 @@ if not exist "%VECTOR%" (echo NVFP4 fork refusal projection is missing.& if not 
 if not exist "%DATA_ROOT%\logs" mkdir "%DATA_ROOT%\logs"
 if errorlevel 1 (echo Could not create the Strata log directory.& if not defined STRATA_SUPERVISOR_CHILD pause& exit /b 17)
 if not exist "%PROFILE_DIR%" mkdir "%PROFILE_DIR%"
-"%PYTHON%" "%STRATA_ROOT%tools\strata_iq4xs_profiles.py" render-profile --mode on --strata-root "%STRATA_ROOT%." --data-root "%DATA_ROOT%" --output "%PROFILE%"
+"%PYTHON%" "%STRATA_ROOT%tools\strata_iq4xs_profiles.py" render-profile --mode on --strata-root "%STRATA_ROOT%." --data-root "%DATA_ROOT%" --output "%PROFILE%" --context %CONTEXT_TOKENS%
 if errorlevel 1 (echo Could not render the ON profile.& if not defined STRATA_SUPERVISOR_CHILD pause& exit /b 18)
 
 "%PYTHON%" "%STRATA_ROOT%tools\patch_nvfp4_server_effort.py" "%FORK_ROOT%\serve\server.py"
@@ -99,7 +112,8 @@ if "%STRATA_SERVER_LOCAL_ONLY%"=="1" echo Loopback API bind is enabled for local
 if not "%STRATA_SERVER_LOCAL_ONLY%"=="1" echo LAN API bind is enabled; authentication is required. Use only a trusted Private network.
 echo If remote clients are blocked, install the Private/LocalSubnet rule from the setup checkout's tools\windows\allow_strata_lan.ps1.
 echo Uncensored mode is ON; the compatible refusal projection is loaded.
-echo Context cap: 262144. Full 262K context stress was not verified.
+echo Context cap: %CONTEXT_TOKENS%. Start a new client session after switching context.
+if "%CONTEXT_TOKENS%"=="1048576" echo 1M context uses dynamic RoPE: trained angles through 262K, then YaRN up to factor 4.
 echo Vision encoding uses CPU. The comparison sent no image.
 "%PYTHON%" -m serve.server --engine strata --config "%PROFILE%" --host "%STRATA_BIND_HOST%" --port 8080 --image-max-tokens 1024
 set "EXIT_CODE=%ERRORLEVEL%"

@@ -12,7 +12,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-from tools.strata_server_supervisor import Supervisor, OwnedProcess, BoundedLog, control_handler, owner_lock
+from tools.strata_server_supervisor import Supervisor, OwnedProcess, BoundedLog, control_handler, owner_lock, configure_client_context
 
 
 FIXTURE = '''
@@ -23,7 +23,8 @@ class Handler(BaseHTTPRequestHandler):
  def do_GET(self):
   if self.headers.get('Authorization')!='Bearer fixture-key':
    self.send_error(401);return
-  data={'/health':{'status':'ok','loaded':True},'/v1/models':{'data':[{'id':'fixture'}]},'/slots':[{'is_processing':False}]}[self.path]
+  state={'model':'fixture'}
+  data={'/health':{'status':'ok','loaded':True,**state},'/v1/models':{'data':[{'id':state['model']}]},'/slots':[{'is_processing':False}]}[self.path]
   raw=json.dumps(data).encode();self.send_response(200);self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
 HTTPServer(('127.0.0.1',int(sys.argv[1])),Handler).serve_forever()
 '''
@@ -36,6 +37,15 @@ def free_port():
 
 
 class SupervisorTests(unittest.TestCase):
+    def test_failed_client_projection_does_not_stop_a_ready_owned_server(self):
+        self.supervisor.start()
+        with patch('tools.strata_server_supervisor.sync_client_context', side_effect=RuntimeError('fixture client unavailable')):
+            result = configure_client_context(self.supervisor, self.root)
+        self.assertEqual(result['status'], 'failed')
+        self.assertTrue(self.supervisor.process.alive())
+        self.assertTrue(self.supervisor.api('/health')['loaded'])
+        self.assertEqual(json.loads((self.root/'client-context.json').read_text())['status'], 'failed')
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
@@ -74,6 +84,31 @@ class SupervisorTests(unittest.TestCase):
         pid=self.supervisor.process.child.pid
         self.assertEqual(self.supervisor.request('one',first['checkpoint'])['state'],'ready')
         self.assertEqual(self.supervisor.process.child.pid,pid)
+
+    def test_model_is_discovered_and_clients_sync_once_after_each_owned_start(self):
+        state = self.root/'model.json'
+        state.write_text(json.dumps({'model': 'first-model'}))
+        Path(self.supervisor.process.command[1]).write_text(FIXTURE.replace(
+            "state={'model':'fixture'}", "state=json.load(open(sys.argv[2]))"), encoding='utf-8')
+        self.supervisor.process.command.append(str(state))
+        self.supervisor.expected_model = None
+        self.supervisor.client_home = self.root
+        seen = []
+        def sync(home, **kwargs):
+            seen.append(kwargs)
+            return {'model': kwargs['model']}
+        with patch('tools.strata_server_supervisor.sync_client_context', side_effect=sync):
+            self.supervisor.start()
+            self.assertEqual(self.supervisor.model, 'first-model')
+            state.write_text(json.dumps({'model': 'second-model'}))
+            first = self.supervisor.request('model-switch', 'saved work before model change')
+            self.supervisor.worker.join(timeout=10)
+            self.assertEqual(self.supervisor.snapshot()['state'], 'ready')
+            self.assertEqual(self.supervisor.model, 'second-model')
+            self.supervisor.request('model-switch', first['checkpoint'])
+        self.assertEqual([s['model'] for s in seen], ['first-model', 'second-model'])
+        self.assertTrue(all(s['server_url'] == self.supervisor.server_url for s in seen))
+        self.assertTrue(all(s['api_key_file'] == self.supervisor.key_file for s in seen))
 
     @unittest.skipUnless(sys.platform=='win32','Windows BAT execution only')
     def test_windows_bat_launcher_with_spaces_joins_owned_job_before_spawn(self):

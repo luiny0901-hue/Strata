@@ -10,6 +10,9 @@ from copy import deepcopy
 import hashlib
 import json
 from pathlib import Path
+from urllib.parse import urlsplit
+from urllib.error import HTTPError
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 try:
     import tomllib
 except ImportError:  # Do not break the existing Python 3.10 Claude-only doctor.
@@ -31,6 +34,9 @@ WIRE_VERSION = 'opencodex-low-medium-high-v1'
 # The existing dispatcher permits 600-second calls. Give that owner time to
 # return its timeout/cancellation result rather than cutting it off in Codex.
 MCP_CALL_TIMEOUT_SECONDS = 660
+# Startup has a 90-second outer limit. Three bounded 5-second metadata reads
+# and at most three management calls must finish before that owner expires.
+CONTEXT_SYNC_CALL_TIMEOUT_SECONDS = 20
 MCP_START = '# BEGIN strata-client-mcp:v1'
 MCP_END = '# END strata-client-mcp:v1'
 GUIDE_START = '<!-- strata-client-guidance:v1 -->'
@@ -43,9 +49,101 @@ def _toml_loads(text):
     return tomllib.loads(text)
 
 
+def runtime_metadata(home, *, server_url=None, api_key_file=None, expected_model=None):
+    """Read the READY local server, never a cached gateway model catalog.
+
+    Endpoint/key overrides come only from the opted-in process owner. Do not
+    follow redirects with credentials or copy the large template into receipts.
+    """
+    base, _ = shared.gateway(home)
+    if server_url is not None or api_key_file is not None:
+        parsed = urlsplit(server_url or '')
+        if (parsed.scheme not in ('http', 'https')
+                or parsed.hostname not in ('127.0.0.1', 'localhost', '::1')
+                or parsed.username or parsed.password or parsed.query or parsed.fragment
+                or parsed.path not in ('', '/') or api_key_file is None):
+            raise ValueError('서버 소유자의 로컬 주소와 API 키 파일을 함께 지정하세요.')
+        origin = server_url.rstrip('/')
+        key = api_key_file.expanduser().read_text(encoding='utf-8-sig').strip()
+        if not key or '\n' in key or '\r' in key:
+            raise ValueError('서버 API 키 파일 형식을 확인하세요.')
+        headers = {'Authorization': 'Bearer '+key}
+    else:
+        origin, headers = shared.strata_upstream(home)
+    class NoRedirect(HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None
+    opener = build_opener(NoRedirect())
+    def read(url, auth):
+        try:
+            with opener.open(Request(url, headers=auth), timeout=5) as response:
+                raw = response.read(256*1024+1)
+        except HTTPError as exc:
+            exc.close()
+            raise
+        if len(raw) > 256*1024:
+            raise ValueError('서버 정보가 256 KiB를 초과했습니다.')
+        value = json.loads(raw)
+        if not isinstance(value, dict):
+            raise ValueError('서버 정보는 JSON 객체여야 합니다.')
+        return value
+    gateway = read(base+'/healthz', {'Authorization': 'Bearer opencodex-proxy'})
+    if gateway.get('status') != 'ok' or 'opencodex' not in str(gateway.get('service', '')).lower():
+        raise ValueError('OpenCodex 상태를 확인할 수 없습니다.')
+    health = read(origin+'/health', headers)
+    model, context = health.get('model'), health.get('max_context')
+    if (health.get('status') != 'ok' or health.get('loaded') is not True
+            or health.get('service') != 'strata' or not isinstance(model, str)
+            or not model.strip() or model != model.strip()
+            or type(context) is not int or context < 4096):
+        raise ValueError('실제 Strata 모델·컨텍스트가 준비되지 않았습니다.')
+    if expected_model is not None and model != expected_model:
+        raise ValueError('서버 소유자가 확인한 모델과 실제 모델이 다릅니다.')
+    props = read(origin+'/props', headers)
+    defaults = props.get('default_generation_settings', {})
+    if props.get('model_alias') != model or defaults.get('n_ctx') != context:
+        raise ValueError('조회 중 서버 모델 또는 컨텍스트가 바뀌었습니다. 새 상태를 확인하세요.')
+    output = defaults.get('params', {}).get('n_predict', -1)
+    if type(output) is not int or output == 0 or output < -1 or output >= context:
+        raise ValueError('실제 서버 출력 기본값을 확인하세요.')
+    if output == -1:
+        output = shared.direct.context_limits(context)[0]
+    result = {'model': model, 'context': context, 'max_output_tokens': output,
+              'base_url': origin+'/v1', 'images': health.get('images') is True}
+    if api_key_file is not None:
+        # Keep an existing env/file reference when it resolves to the same key.
+        # The editor already owns this field; changed keys never go to stdout.
+        try:
+            _, previous_headers = shared.strata_upstream(home)
+        except (OSError, ValueError):
+            previous_headers = {}
+        if previous_headers.get('Authorization') != headers.get('Authorization'):
+            result['api_key'] = key
+    return result
+
+
+def runtime_provider(provider, runtime):
+    """Project only client-visible facts; engine/GPU/cache settings stay on the server."""
+    result = deepcopy(provider)
+    previous = result.get('defaultModel')
+    model = runtime['model']
+    result.update(defaultModel=model, baseUrl=runtime['base_url'])
+    if 'api_key' in runtime:
+        result['apiKey'] = runtime['api_key']
+    if isinstance(result.get('models'), list):
+        result['models'] = list(dict.fromkeys(model if m == previous else m for m in result['models']))
+        if model not in result['models']:
+            result['models'].append(model)
+    capabilities = result.setdefault('modelCapabilities', {})
+    if not isinstance(capabilities, dict) or not isinstance(capabilities.get(model, {}), dict):
+        raise ValueError('Strata 모델 기능 설정은 JSON 객체여야 합니다.')
+    capabilities.setdefault(model, {})['inputModalities'] = ['text', 'image'] if runtime['images'] else ['text']
+    return result
+
+
 def model_projection(provider, settings, context):
     """Keep other models, credentials and explicit request limits unchanged."""
-    if type(context) is not int or not 1 <= context <= 1_000_000:
+    if type(context) is not int or context < 4096:
         raise ValueError('실제 Strata 컨텍스트 값을 확인하세요.')
     model = provider.get('defaultModel')
     if provider.get('adapter') != 'anthropic' or not isinstance(model, str) or not model:
@@ -78,14 +176,19 @@ def model_projection(provider, settings, context):
     return result
 
 
-def sync_model(home):
+def sync_model(home, *, settings=None, context=None, timeout=60, runtime=None):
     """Use the live provider editor; never replace the full OpenCodex config."""
     base, model = shared.gateway(home)
-    context = shared.health(base, model, home=home, discover=False)
+    if runtime is not None and context is None:
+        context = runtime['context']
+    if context is None:
+        context = shared.health(base, model, home=home, discover=False)
     path = home/'.opencodex/config.json'
     original = shared.read_json(path)['providers']['strata']
-    settings = shared.read_json(home/'.claude/settings.json')
-    projected = model_projection(original, settings, context)
+    if settings is None:
+        settings = shared.read_json(home/'.claude/settings.json')
+    projected = model_projection(runtime_provider(original, runtime) if runtime else original, settings, context)
+    model = 'strata/'+projected['defaultModel']
     changed = projected != original
     backup = None
     if changed:
@@ -102,18 +205,151 @@ def sync_model(home):
             json.dump(original, f, ensure_ascii=False, indent=2)
             backup = f.name
         receipt, error = shared.management_json(home, base, '/api/providers',
-            body={'name': 'strata', 'provider': projected}, timeout=60)
+            body={'name': 'strata', 'provider': projected}, timeout=timeout)
         if error or not isinstance(receipt, dict) or receipt.get('success') is not True:
             raise ValueError('OpenCodex 공급자 갱신이 확인되지 않았습니다. 자동 재전송하지 않습니다: '
                              +(error or 'invalid_receipt'))
     current = shared.read_json(path)['providers']['strata']
-    if any(current.get(key) != projected.get(key) for key in (*MODEL_FIELDS, 'headers')):
+    if any(current.get(key) != projected.get(key) for key in
+           (*MODEL_FIELDS, 'headers', 'defaultModel', 'baseUrl', 'apiKey', 'models', 'modelCapabilities')):
         raise ValueError('저장된 Strata 공통 설정이 요청한 값과 다릅니다.')
     return {'model': model, 'context': context,
             'max_output_tokens': projected['modelMaxOutputTokens'][model.split('/', 1)[1]],
             'reasoning_efforts': list(EFFORT_LEVELS),
             'default_effort': settings.get('effortLevel', 'medium'),
             'changed': changed, 'backup': backup, 'runtime_status': 'not_verified'}
+
+
+def sync_desktop_context(home, base, model, *, timeout=60):
+    """Refresh the applied gateway via OpenCodex's existing profile owner."""
+    library = shared.desktop_config_library(home)
+    meta = shared.read_json(library/'_meta.json', {})
+    if not meta.get('appliedId'):
+        return {'status': 'not_configured'}
+    import uuid
+    path = library/(str(uuid.UUID(meta['appliedId']))+'.json')
+    profile = shared.read_json(path)
+    if profile.get('inferenceProvider') != 'gateway' or profile.get('inferenceGatewayBaseUrl') != base:
+        return {'status': 'another_profile_selected'}
+    state, error = shared.management_json(home, base, '/api/claude-desktop', timeout=timeout)
+    if error or not isinstance(state, dict):
+        raise ValueError('Desktop 모델 프로필 조회 실패: '+str(error))
+    row = next((r for r in state.get('rendered', []) if r.get('route') == model), None)
+    if not row or not isinstance(row.get('name'), str):
+        raise ValueError('현재 Desktop 프로필에서 Strata 경로를 찾지 못했습니다.')
+    saved = next((r for r in profile.get('inferenceModels', []) if r.get('name') == row['name']), {})
+    desired = row.get('supports1m') is True
+    changed = not saved or bool(saved.get('supports1m')) != desired or bool(saved.get('prefer1m')) != desired
+    if changed:
+        mode = ('hybrid' if profile.get('inferenceModels') else 'discovery') if profile.get('modelDiscoveryEnabled') else 'static'
+        receipt, error = shared.management_json(home, base, '/api/claude-desktop/apply',
+                                               body={'mode': mode}, timeout=timeout)
+        if error or not isinstance(receipt, dict) or receipt.get('applied') is not True:
+            raise ValueError('Desktop 프로필 갱신이 확인되지 않았습니다: '+str(error))
+        profile = shared.read_json(path)
+        saved = next((r for r in profile.get('inferenceModels', []) if r.get('name') == row['name']), {})
+        if not saved or bool(saved.get('supports1m')) != desired or bool(saved.get('prefer1m')) != desired:
+            raise ValueError('저장된 Desktop 1M 표시가 실제 모델 정보와 다릅니다.')
+    return {'status': 'new_desktop_session_required', 'wire_model': row['name'],
+            'supports_1m': desired, 'changed': changed}
+
+
+def sync_context(home, *, runtime=None):
+    """Project the READY server's window through the existing client owners once.
+
+    Sessions already open retain their own startup metadata. No client restart or
+    request replay is performed here, and unrelated model selections are preserved.
+    """
+    base, previous_model = shared.gateway(home)
+    context = runtime['context'] if runtime else shared.health(base, previous_model, home=home, discover=False)
+    model = 'strata/'+runtime['model'] if runtime else previous_model
+    profile = home/'.claude'
+    path = profile/'settings.json'
+    original = path.read_bytes()
+    settings = json.loads(original)
+    if not isinstance(settings, dict) or not isinstance(settings.get('env', {}), dict):
+        raise ValueError('Claude settings/env는 JSON 객체여야 합니다.')
+    claude_selected = settings.get('model') in (previous_model, model)
+    if not claude_selected and runtime is None:
+        raise ValueError('Claude의 선택 모델이 Strata와 다릅니다. 다른 모델 설정은 변경하지 않습니다.')
+    provider = shared.read_json(home/'.opencodex/config.json')['providers']['strata']
+    if not claude_selected:
+        # Provider/catalog updates remain useful while Claude uses another model.
+        # Build the Strata policy in memory without publishing foreign selections.
+        settings['effortLevel'] = provider.get('modelDefaultReasoningEfforts', {}).get(
+            runtime['model'], provider.get('modelDefaultReasoningEfforts', {}).get(
+                previous_model.removeprefix('strata/'), 'medium'))
+    output, window = shared.direct.context_limits(context)
+    if runtime:
+        output = runtime['max_output_tokens']
+    env = settings.setdefault('env', {})
+    env.update(CLAUDE_CODE_MAX_CONTEXT_TOKENS=str(context),
+               CLAUDE_CODE_MAX_OUTPUT_TOKENS=str(output))
+    if window == 'auto':
+        env.pop('CLAUDE_CODE_AUTO_COMPACT_WINDOW', None)
+    else:
+        env['CLAUDE_CODE_AUTO_COMPACT_WINDOW'] = str(window)
+    # Managed aliases must follow a model rename, but explicit other model routes
+    # are not selections this projection owns.
+    for name in ('ANTHROPIC_MODEL', 'ANTHROPIC_SMALL_FAST_MODEL', 'CLAUDE_CODE_SUBAGENT_MODEL',
+                 'ANTHROPIC_CUSTOM_MODEL_OPTION', 'ANTHROPIC_DEFAULT_OPUS_MODEL',
+                 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL'):
+        if env.get(name) == previous_model:
+            env[name] = model
+    settings.update(model=model, autoCompactWindow=window, autoCompactEnabled=True)
+    # An explicit disable would otherwise silently defeat the requested window.
+    for name in ('DISABLE_AUTO_COMPACT', 'DISABLE_COMPACT', 'CLAUDE_CODE_DISABLE_1M_CONTEXT'):
+        env.pop(name, None)
+    files = {path: json.dumps(settings, ensure_ascii=False, indent=2)+'\n'} if claude_selected else {}
+    before = {path: original} if claude_selected else {}
+    state_path = profile/shared.STATE
+    if state_path.is_file():
+        before[state_path] = state_path.read_bytes()
+        state = json.loads(before[state_path])
+        state.update(context=context, model=model)
+        files[state_path] = json.dumps(state, ensure_ascii=False, indent=2)+'\n'
+    # An existing per-model Codex catalog must agree. Never set a global override:
+    # the user also selects other models and those keep their own windows.
+    codex_config = home/'.codex/config.toml'
+    codex = _toml_loads(codex_config.read_text(encoding='utf-8')) if codex_config.is_file() else {}
+    if codex.get('model_catalog_json') and (codex.get('model_context_window', context) != context
+            or codex.get('model_auto_compact_token_limit') is not None):
+        raise ValueError('Codex 전역 컨텍스트/압축 설정이 모델별 동기화와 충돌합니다. 기존 값은 보존했습니다.')
+    # Validate the complete projection before touching any owner. Publish local
+    # files last: a refused/uncertain remote write must not advance Claude alone.
+    model_projection(runtime_provider(provider, runtime) if runtime else provider, settings, context)
+    phase = 'provider'
+    try:
+        result = sync_model(home, settings=settings, context=context,
+                            timeout=CONTEXT_SYNC_CALL_TIMEOUT_SECONDS, runtime=runtime)
+        phase = 'codex_catalog'
+        saved = audit(home)
+        if codex.get('model_catalog_json') and (not saved['checks']['codex_context']
+                or not saved['checks']['codex_auto_compaction']
+                or saved['codex_global_compaction_override'] is not None):
+            raise ValueError('Codex 카탈로그/압축 기준이 서버 한도와 다릅니다.')
+        phase = 'desktop'
+        desktop = sync_desktop_context(home, base, model, timeout=CONTEXT_SYNC_CALL_TIMEOUT_SECONDS)
+        phase = 'local_settings'
+        backup, changed = shared.publish_files(files, profile, before)
+    except (OSError, ValueError, RuntimeError) as exc:
+        # Other owners may already have accepted their updates. Do not roll them
+        # back or replay uncertain requests; retain the provider owner's backup.
+        raise ValueError(f'컨텍스트 동기화 중단: context={context}, phase={phase}. '
+                         '일부 원격 설정은 반영됐을 수 있으므로 현재 상태를 확인하세요. '
+                         '자동 재전송하지 않습니다. '+str(exc)) from exc
+    return {**result, 'claude_compaction_window': window,
+            'server': {'base_url': runtime['base_url'], 'images': runtime['images']} if runtime else None,
+            'desktop': desktop,
+            'codex_compaction_trigger': saved['codex_compaction_trigger'],
+            'settings_changed_files': changed, 'settings_backup': str(backup) if backup else None,
+            'claude_selection': 'synchronized' if claude_selected else 'another_model_preserved',
+            'runtime_status': 'new_client_session_required'}
+
+
+def sync_runtime(home, **kwargs):
+    """One snapshot and one projection per opted-in start/restart; no watcher."""
+    return sync_context(home, runtime=runtime_metadata(home, **kwargs))
 
 
 def _toml_server(name, server):
@@ -257,6 +493,9 @@ def audit(home):
         'claude_context': context is not None and env.get('CLAUDE_CODE_MAX_CONTEXT_TOKENS') == str(context),
         'claude_output': output is not None and env.get('CLAUDE_CODE_MAX_OUTPUT_TOKENS') == str(output),
         'codex_context': bool(row) and effective_codex_context == context,
+        'codex_auto_compaction': (type(row.get('auto_compact_token_limit')) is int
+            and type(effective_codex_context) is int
+            and 0 < row['auto_compact_token_limit'] < effective_codex_context),
         'native_efforts': provider.get('modelReasoningEfforts', {}).get(model_id) == list(EFFORT_LEVELS),
         'default_effort': provider.get('modelDefaultReasoningEfforts', {}).get(model_id) == settings.get('effortLevel'),
         'effort_wire': any(k.lower() == WIRE_HEADER and v == WIRE_VERSION
@@ -284,8 +523,23 @@ def main(argv=None):
     parser.add_argument('--codex-only', action='store_true',
                         help='다른 PC에서 공통 모델 설정은 건드리지 않고 로컬 Codex MCP·지침만 연결')
     parser.add_argument('--check', action='store_true', help='변경 없이 저장된 클라이언트 설정 차이 확인')
+    parser.add_argument('--sync-context', action='store_true', help='준비된 서버의 컨텍스트·압축 창만 동기화')
+    parser.add_argument('--sync-runtime', action='store_true', help='준비된 서버의 모델·컨텍스트·출력·비전 정보를 동기화')
+    parser.add_argument('--server-url', help='관리 실행기가 소유한 로컬 Strata 주소')
+    parser.add_argument('--api-key-file', type=Path, help='해당 서버의 기존 API 키 파일')
+    parser.add_argument('--expected-model', help='관리 실행기가 READY에서 확인한 모델 ID')
     args = parser.parse_args(argv)
     home = Path.home()
+    if args.sync_runtime:
+        print(json.dumps(sync_runtime(home, server_url=args.server_url,
+                                    api_key_file=args.api_key_file, expected_model=args.expected_model),
+                         ensure_ascii=False))
+        return 0
+    if args.server_url or args.api_key_file or args.expected_model:
+        parser.error('서버 식별 인수는 --sync-runtime과 함께 사용하세요.')
+    if args.sync_context:
+        print(json.dumps(sync_context(home), ensure_ascii=False))
+        return 0
     if args.check:
         result = audit(home)
         print(json.dumps(result, ensure_ascii=False))

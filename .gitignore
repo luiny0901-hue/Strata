@@ -74,6 +74,8 @@ build-vision-cuda12.bat
 # Supported Claude client entry points.
 !/run-claude-opencodex.bat
 !/run-claude-opencodex.sh
+!/run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-on-1m.bat
+!/run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-off-1m.bat
 
 # Local source-integration backups, not distributable runtime assets.
 /serve/.response-guard/

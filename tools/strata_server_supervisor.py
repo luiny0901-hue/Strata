@@ -271,9 +271,10 @@ class OwnedProcess:
 
 class Supervisor:
     def __init__(self, directory, command, server_url, key_file, model, *, ready_timeout=600, console_log=False,
-                 updates=None):
+                 updates=None, client_home=None):
         self.directory, self.server_url = directory, server_url.rstrip('/')
         self.key_file, self.model, self.ready_timeout = key_file, model, ready_timeout
+        self.expected_model, self.client_home = model, client_home
         self.log = BoundedLog(directory / 'server.log')
         self.process = OwnedProcess(command, self.log, console_log=console_log)
         self.lock, self.stopping = threading.RLock(), threading.Event()
@@ -317,8 +318,11 @@ class Supervisor:
                 raise RuntimeError('Cannot persist server log: '+self.process.log_error)
             try:
                 health, models = self.api('/health'), self.api('/v1/models')
+                model = self.expected_model or health.get('model')
                 if (health.get('status') == 'ok' and health.get('loaded') is True
-                        and any(m.get('id') == self.model for m in models.get('data', []))):
+                        and isinstance(model, str) and bool(model)
+                        and any(m.get('id') == model for m in models.get('data', []))):
+                    self.model = model
                     return
             except HTTPError as exc:
                 if exc.code in (401,403):
@@ -349,6 +353,8 @@ class Supervisor:
             except BaseException:
                 self.process.stop()
                 raise
+        if self.client_home is not None:
+            configure_client_context(self, self.client_home)
 
     def watch_updates(self):
         # Only this owner watches; a release never triggers a live restart.
@@ -468,6 +474,8 @@ class Supervisor:
             # Cancellation after shutdown still restores the service, without resuming agent work.
             self.process.start()
             self.wait_ready()
+            if self.client_home is not None:
+                configure_client_context(self, self.client_home)
             terminal={'state':'cancelled' if self.snapshot()['cancelled'] else 'ready'}
         except Exception as exc:
             terminal={'state':'failed','error':str(exc)}
@@ -566,13 +574,60 @@ def control_handler(supervisor, token, desktop=None, desktop_error=None):
     return Handler
 
 
+def sync_client_context(home, *, server_url=None, api_key_file=None, model=None):
+    """Use the already-installed client integration owner, not a second config writer."""
+    state_path = home / '.claude' / 'strata-opencodex.json'
+    if not state_path.is_file():
+        print('Local Claude integration is not configured; remote clients must sync their own context.', flush=True)
+        return
+    tool = Path(__file__).with_name('strata_client_settings.py')
+    if not tool.is_file():
+        state = json.loads(state_path.read_text(encoding='utf-8'))
+        import re
+        hook = re.search(r'"([^"\r\n]*[\\/]claude_opencodex_client\.py)"', state.get('hook_command', ''))
+        if hook:
+            tool = Path(hook[1]).with_name('strata_client_settings.py')
+        project = state.get('maintenance_mcp', {}).get('project')
+        if not tool.is_file() and not isinstance(project, str):
+            raise RuntimeError('Cannot locate the installed Strata client configuration owner')
+        if not tool.is_file():
+            tool = Path(project) / 'tools' / 'strata_client_settings.py'
+    command = [sys.executable, '-B', '-X', 'utf8', str(tool), '--sync-runtime']
+    if server_url is not None:
+        command += ['--server-url', server_url, '--api-key-file', str(api_key_file)]
+    if model is not None:
+        command += ['--expected-model', model]
+    result = subprocess.run(command,
+                            capture_output=True, timeout=90)
+    if result.returncode:
+        raise RuntimeError('Client context sync failed; inspect the saved client settings before starting a new session: '
+                           +result.stderr.decode('utf-8', errors='replace')[-2000:])
+    print(result.stdout.decode('utf-8', errors='replace').strip(), flush=True)
+    return json.loads(result.stdout)
+
+
+def configure_client_context(supervisor, home):
+    """A client configuration error must not kill work accepted by a READY server."""
+    try:
+        result = sync_client_context(home, server_url=supervisor.server_url,
+                                     api_key_file=supervisor.key_file, model=supervisor.model)
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        result = {'status': 'failed', 'error': str(exc)[-2000:]}
+        print('Strata is ready, but client context synchronization failed. Inspect client-context.json '
+              'before starting a new client session; the server was kept running.', flush=True)
+    else:
+        result = {'status': 'synchronized' if result else 'not_configured', 'result': result}
+    publish(supervisor.directory / 'client-context.json', result)
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--launcher', required=True, type=Path)
     parser.add_argument('--state-dir', required=True, type=Path)
     parser.add_argument('--api-key-file', required=True, type=Path)
     parser.add_argument('--token-file', required=True, type=Path)
-    parser.add_argument('--model', default='qwen3.8-flash-next-unsloth-ud-iq4_xs')
+    parser.add_argument('--model', help='Optional exact model check; otherwise discover the owned READY model')
     parser.add_argument('--server-url', default='http://127.0.0.1:8080')
     parser.add_argument('--control-port', default=8768, type=int)
     parser.add_argument('--console-log', action='store_true', help='Also display child output in the launcher console')
@@ -580,6 +635,8 @@ def main():
                         help='Optional user opt-in for checkpointed Desktop restart/recovery')
     parser.add_argument('--fork-update-root', type=Path,
                         help='Optional NVFP4 stable-update opt-in; activates prepared bundles on owner startup only')
+    parser.add_argument('--sync-client-context', action='store_true',
+                        help='After each READY start/restart, sync clients to the actual local server settings')
     args = parser.parse_args()
     url = urlsplit(args.server_url)
     if url.scheme != 'http' or url.hostname != '127.0.0.1' or url.path or url.query or url.fragment or url.username:
@@ -609,7 +666,8 @@ def main():
                 from strata_fork_update import ForkUpdates
             updates = ForkUpdates(args.fork_update_root)
         supervisor = Supervisor(args.state_dir, [str(args.launcher.resolve())], args.server_url,
-                                args.api_key_file, args.model, console_log=args.console_log, updates=updates)
+                                args.api_key_file, args.model, console_log=args.console_log, updates=updates,
+                                client_home=Path.home() if args.sync_client_context else None)
         desktop, desktop_error = None, None
         if args.desktop_restart_config and args.desktop_restart_config.is_file():
             try:

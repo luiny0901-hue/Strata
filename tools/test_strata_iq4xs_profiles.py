@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -23,6 +25,19 @@ from tools.strata_iq4xs_profiles import (
 
 
 class LauncherImageBudgetTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == 'nt', 'Windows CMD wrapper contract')
+    def test_1m_wrappers_forward_context_and_owned_mode_with_spaces(self):
+        with tempfile.TemporaryDirectory(prefix='strata 1m ') as temporary:
+            root = Path(temporary)
+            for mode in ('on', 'off'):
+                stem = f'run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-{mode}'
+                (root/(stem+'-1m.bat')).write_bytes((ROOT/(stem+'-1m.bat')).read_bytes())
+                (root/(stem+'.bat')).write_bytes(b'@echo off\r\necho CONTEXT=%STRATA_IQ4XS_CONTEXT% MODE=%1\r\nexit /b 7\r\n')
+                result = subprocess.run(['cmd.exe','/d','/c',str(root/(stem+'-1m.bat'))],
+                                        capture_output=True,timeout=10)
+                self.assertEqual(result.returncode,7)
+                self.assertIn(b'CONTEXT=1048576 MODE=--managed',result.stdout)
+
     def test_both_uncensored_modes_use_the_1024_image_token_budget(self) -> None:
         for mode in ("off", "on"):
             with self.subTest(mode=mode):
@@ -45,6 +60,30 @@ class LauncherImageBudgetTests(unittest.TestCase):
 
 
 class ProfileTemplateTests(unittest.TestCase):
+    def test_1m_is_a_separate_scaled_profile_and_default_is_unchanged(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            for mode in ('on', 'off'):
+                normal, extended = base/(mode+'.json'), base/(mode+'-1m.json')
+                render_profile(ROOT, mode, ROOT, base, normal)
+                before = normal.read_bytes()
+                render_profile(ROOT, mode, ROOT, base, extended, 1048576)
+                self.assertEqual(normal.read_bytes(), before)
+                profile = json.loads(extended.read_text(encoding='utf-8'))
+                args = profile['args']
+                for flag, expected in [('--max-context', '1048576'), ('--rope-scaling', 'dynamic'),
+                                       ('--rope-scale', '4'), ('--vram-reserve-mib', '768')]:
+                    self.assertEqual(args.count(flag), 1)
+                    self.assertEqual(args[args.index(flag)+1], expected)
+                self.assertEqual(profile['model_name'], MODEL_KEY)
+                self.assertEqual(profile['gpu'], 1)
+                self.assertEqual(profile['uncensored'], mode == 'on')
+                self.assertTrue(profile['log'].endswith('-1m.log'))
+                self.assertIs(profile['rope_auto'], True)
+                with self.assertRaises(ValueError):
+                    render_profile(ROOT, mode, ROOT, base, normal, 1000000)
+                self.assertEqual(normal.read_bytes(), before)
+
     def test_installer_gpu_override_is_local_and_invalid_values_do_not_replace_profiles(self):
         import os
         from unittest.mock import patch
@@ -90,9 +129,8 @@ class ProfileTemplateTests(unittest.TestCase):
                     str(data_root / "packs" / "unsloth-ud-iq4_xs"),
                 )
                 self.assertEqual(profile["args"][profile["args"].index("--max-context") + 1], "262144")
-                self.assertEqual(profile["args"][profile["args"].index("--vram-reserve-mib") + 1], "448")
-                self.assertEqual(profile["args"][profile["args"].index("--prefill") + 1],
-                                 "auto:16384" if mode == "on" else "auto")
+                self.assertEqual(profile["args"][profile["args"].index("--vram-reserve-mib") + 1], "768")
+                self.assertEqual(profile["args"][profile["args"].index("--prefill") + 1], "auto:8192")
                 for option, value in (("--conversation-cache-mib", "8192"),
                                       ("--conversation-cache-slots", "2"),
                                       ("--conversation-cache-min-free-mib", "8192"),
