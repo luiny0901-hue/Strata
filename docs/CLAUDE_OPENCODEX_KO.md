@@ -159,3 +159,9 @@ Claude Code CLI와 Claude Desktop Code는 `~/.claude/settings.json`, `~/.claude.
 Windows 실행기 `cmd.exe /d /c setup-claude-opencodex.bat clients --help`는 종료 0이었다. 새 .command의 `bash -n`은 샌드박스의 MSYS 내부 객체 권한 때문에 첫 실행에 실패했고 허용된 환경에서 같은 문법 검사만 재실행해 종료 0이었다. 안내문서의 로컬 링크와 POSIX 실행기의 LF를 확인했다. 안내 갱신 도구는 첫 시도에 기존 제목 불일치로 게시 전에 중단했으며, 실제 제목을 확인해 수정한 뒤 게시했다.
 
 소스 백업 영수증: `C:/Users/luiny/.claude/backups/strata-opencodex-20261028T144027431577Z/files.json`, `C:/Users/luiny/.claude/backups/strata-opencodex-20261028T144559678702Z/files.json`, `C:/Users/luiny/.claude/backups/strata-opencodex-20261028T144750235854Z/files.json`. 시험 홈 수정은 별도 백업을 남겼다. 실제 사용자 설정·공급자·실행 중 서비스·방화벽·SSH·VPN은 변경하지 않았다. 패키지/모델을 설치하거나 Linux GPU, 실제 Mac, 새로 설치한 PC, 외부 네트워크에서 실행한 결과가 아니다. SSH·Mac 권한 절차는 위 공식 원문을 확인해 안내에 반영했다. 코드 준비·오프라인 검사를 전체 환경의 실기 통과로 표시하지 않는다.
+
+## 2026-11-01 클라이언트 중간 과정·완료 출력 점검
+
+네 클라이언트 경로에서 공식 모델과 같이 중간 과정(생각·도구)이 흐르고 최종 결과가 완료 신호까지 출력되는지 확인했다. 게이트웨이 원시 SSE에서 Anthropic Messages 경로는 `thinking_delta`·`text_delta`·`input_json_delta`와 `message_stop`을, Codex가 쓰는 Responses 경로는 reasoning 요약 델타·`output_text.delta`·`function_call` 델타와 `response.completed`를 반환했다. 터미널 Claude CLI는 사용자 셸에서 생각 이벤트와 도구 왕복 뒤 전문과 `end_turn`을 받고 종료 0으로 끝났고, Codex CLI는 `codex exec`에서 요약 줄과 셸 도구 실행·최종 답변·토큰 수까지 출력했다. Codex Desktop(ChatGPT 앱)은 세션 로그에 Strata 모델을 reasoning 기록과 함께 실행한 스레드가 남아 있고 화면 단계 표시 설정도 켜져 있었으나, 앱 창이 없어 실제 화면 확인은 하지 못했다. Desktop Code는 이 대화와 최근 12건의 200 응답이 같은 경로의 증거다.
+
+이전에 터미널 CLI 로그인 실패로 알려진 것은 에이전트 도구 셸이 Desktop 3p 진입점을 물려받아 발생한 오인이었다. `unrecognized_model` stderr 경고의 원인은 게이트웨이 `/v1/models`(16개)가 Desktop 별칭(`claude-fable-5-*`)만 싣고 원본 Strata 모델 ID는 싣지 않는 것이었다. CLI는 세션에서 그 ID를 한 번 알리지만 요청은 성공한다. 별칭은 Desktop이 관리하는 값이라 터미널 설정을 별칭에 결합하지 않고 경고를 유지한다. 재현에 쓰는 원시 이벤트 합계 도구는 `tools/strata_stream_probe.py`이며, 게이트웨이가 보인 이벤트 종류만 요약한다.
