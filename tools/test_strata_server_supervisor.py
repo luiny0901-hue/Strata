@@ -7,12 +7,14 @@ import tempfile
 import threading
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 from tools.strata_server_supervisor import Supervisor, OwnedProcess, BoundedLog, control_handler, owner_lock, configure_client_context
+
+REAL_SESSION_COMPACTION = Supervisor.start_session_compaction
 
 
 FIXTURE = '''
@@ -37,6 +39,22 @@ def free_port():
 
 
 class SupervisorTests(unittest.TestCase):
+    def test_switch_time_compaction_pass_covers_recent_sessions(self):
+        home = self.root/'home'
+        marker = home/'.config'/'strata'/'server-control'
+        marker.mkdir(parents=True)
+        (marker/'session-compact.enabled').write_text('',encoding='utf-8')
+        with patch.object(Supervisor, 'start_session_compaction', REAL_SESSION_COMPACTION), \
+             patch('tools.strata_server_supervisor.Path.home', return_value=home), \
+             patch('tools.strata_server_supervisor.subprocess.run',
+                   return_value=Mock(returncode=0, stdout=b'done', stderr=b'')) as run:
+            self.supervisor.start_session_compaction()
+            self.assertIsNotNone(self.supervisor.compact_worker)
+            self.supervisor.compact_worker.join(timeout=10)
+        command = run.call_args[0][0]
+        self.assertIn('--apply', command)
+        self.assertEqual(command[command.index('--idle-minutes') + 1], '0')
+
     def test_failed_client_projection_does_not_stop_a_ready_owned_server(self):
         self.supervisor.start()
         with patch('tools.strata_server_supervisor.sync_client_context', side_effect=RuntimeError('fixture client unavailable')):
@@ -56,6 +74,12 @@ class SupervisorTests(unittest.TestCase):
         self.supervisor = Supervisor(self.root,[sys.executable,str(fixture),str(free_port())],
             '',key,'fixture',ready_timeout=5)
         self.supervisor.server_url = 'http://127.0.0.1:'+self.supervisor.process.command[-1]
+        # The compaction hook must not spawn a worker against the real user
+        # sessions here, because the enable marker can exist under the home
+        # directory of the machine running the tests.
+        self.compact_off = patch.object(Supervisor, 'start_session_compaction', lambda supervisor: None)
+        self.compact_off.start()
+        self.addCleanup(self.compact_off.stop)
 
     def tearDown(self):
         if self.supervisor.worker:

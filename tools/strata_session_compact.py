@@ -9,7 +9,9 @@ compaction externally: it asks the now-running (smaller) server to summarize
 each session in window-sized chunks, then appends a compact boundary and a
 continuation summary in the same shape the harness writes natively, so the
 same session resumes inside the new window. Opt-in; sessions are only touched
-when idle and oversized, and a backup copy is written before any append.
+when idle and oversized (a backup copy is written before any append). The
+supervisor's switch-time pass uses --idle-minutes 0: the previous server has
+already stopped, so even a just-used session is safe to compact.
 """
 
 from __future__ import annotations
@@ -148,10 +150,14 @@ def discover_sessions(projects_root: Path, idle_minutes: int, now: float) -> lis
     for path in candidates:
         # The whole session stays skipped while any file of the project is
         # still being written, because sidechains share the project directory.
+        # idle_minutes=0 skips nothing: it is the switch-time pass.
         if newest_per_project[path.parent] > idle_after:
             continue
         sessions.append(path)
-    return sorted(sessions)
+    # Newest first, so a run capped at --max-sessions still covers the
+    # session that was in use moments ago.
+    sessions.sort(key=lambda candidate: candidate.stat().st_mtime, reverse=True)
+    return sessions
 
 
 def _record_text(record: dict) -> str:
@@ -360,7 +366,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--server-url", default=SERVER_URL)
     parser.add_argument("--api-key-file", type=Path)
     parser.add_argument("--session-id", help="compact exactly this session id")
-    parser.add_argument("--idle-minutes", type=int, default=DEFAULT_IDLE_MINUTES)
+    parser.add_argument("--idle-minutes", type=int, default=DEFAULT_IDLE_MINUTES,
+                        help="skip projects written in this window; 0 also compacts just-used sessions")
     parser.add_argument("--reserve", type=int, default=DEFAULT_RESERVE_TOKENS,
                         help="tokens left free under the window for the session's next request")
     parser.add_argument("--chunk-tokens", type=int, default=DEFAULT_CHUNK_TOKENS)

@@ -374,8 +374,11 @@ class Supervisor:
             print('Session compaction is enabled but strata_session_compact.py is missing.', flush=True)
             return
         receipt = self.directory / 'session-compact.json'
+        # --idle-minutes 0 is deliberate: this pass runs right after a launcher
+        # switch, when the previous server has already stopped and a just-used
+        # session is exactly the one that needs compacting.
         command = [sys.executable, '-B', '-X', 'utf8', str(tool), '--apply',
-                   '--receipt', str(receipt)]
+                   '--idle-minutes', '0', '--receipt', str(receipt)]
         def run():
             try:
                 result = subprocess.run(command, capture_output=True, timeout=3600)

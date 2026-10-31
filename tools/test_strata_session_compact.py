@@ -157,6 +157,19 @@ class SessionFileTests(unittest.TestCase):
         (idle_dir / "other.jsonl").write_text("{}", encoding="utf-8")
         self.assertEqual(discover_sessions(self.projects, 60, now), [])
 
+    def test_idle_minutes_zero_includes_recently_written_projects(self) -> None:
+        path = self.make_session("88888888-8888-4888-8888-888888888888", 10)
+        self.assertEqual(discover_sessions(self.projects, 60, time.time()), [])
+        self.assertIn(path, discover_sessions(self.projects, 0, time.time()))
+
+    def test_candidates_sort_newest_session_first(self) -> None:
+        older = self.make_session("99999999-9999-4999-8999-999999999999", 10)
+        newer = self.make_session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", 10)
+        now = time.time()
+        os.utime(older, (now - 7200, now - 7200))
+        os.utime(newer, (now - 60, now - 60))
+        self.assertEqual(discover_sessions(self.projects, 0, time.time()), [newer, older])
+
 
 class ExtractionTests(unittest.TestCase):
     def test_record_text_covers_tool_blocks_and_ignores_other_records(self) -> None:
