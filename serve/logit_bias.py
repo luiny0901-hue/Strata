@@ -2,8 +2,29 @@
 import math
 import re
 
+# The Han ban (serve/cjk_ban.py) is tens of thousands of entries and the same dict
+# object every request, so maps above 64 entries are memoized per object identity:
+# pass a large map as a read-only value and never grow or edit it in place.
+_LARGE = 64
+_MEMO_SLOTS = 4
+_normalize_memo: dict = {}
+_key_memo: dict = {}
+
 
 def normalize(value, vocab_size=None):
+    if isinstance(value, dict) and len(value) > _LARGE:
+        hit = _normalize_memo.get(id(value))
+        if hit is not None and hit[0] is value and hit[1] == vocab_size:
+            return dict(hit[2])
+        out = _normalize(value, vocab_size)
+        if len(_normalize_memo) >= _MEMO_SLOTS:
+            _normalize_memo.clear()
+        _normalize_memo[id(value)] = (value, vocab_size, dict(out))
+        return dict(out)
+    return _normalize(value, vocab_size)
+
+
+def _normalize(value, vocab_size=None):
     if value is None:
         return {}
     if isinstance(value, dict):
@@ -37,6 +58,19 @@ def normalize(value, vocab_size=None):
 
 
 def engine_key(value):
+    if isinstance(value, dict) and len(value) > _LARGE:
+        hit = _key_memo.get(id(value))
+        if hit is not None and hit[0] is value:
+            return hit[1]
+        key = _engine_key(value)
+        if len(_key_memo) >= _MEMO_SLOTS:
+            _key_memo.clear()
+        _key_memo[id(value)] = (value, key)
+        return key
+    return _engine_key(value)
+
+
+def _engine_key(value):
     entries = normalize(value)
     return " logit_bias=" + ",".join(f"{i}:{b:g}" for i, b in sorted(entries.items())) if entries else ""
 

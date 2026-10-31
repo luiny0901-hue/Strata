@@ -66,6 +66,7 @@ from serve import logit_bias as bias_api  # noqa: E402
 from serve.winjob import contain  # noqa: E402
 from serve.structured import StructuredOutputError, prepare_format, validated_json  # noqa: E402
 from serve.anthropic_response_guard import configure_response_guard, guard_anthropic_events  # STRATA_ANTHROPIC_RESPONSE_GUARD_V1
+from serve.cjk_ban import configure_cjk_ban  # STRATA_CJK_BAN_V1
 from serve import responses as responses_api  # noqa: E402
 from serve.responses import ResponsesError, error_body as responses_error_body  # noqa: E402
 from serve import images as images_api  # noqa: E402
@@ -6929,6 +6930,7 @@ def main() -> int:
                   flush=True)
     configure_response_guard(svc, cfg.get("anthropic_response_guard", False))  # STRATA_ANTHROPIC_RESPONSE_GUARD_V1
     recovery = cfg.get("reasoning_loop_recovery", False)   # #728: false (default) | "stop" | "recover" (true)
+    configure_cjk_ban(svc, cfg.get("ban_cjk_tokens", False))  # STRATA_CJK_BAN_V1
     if recovery is True:
         recovery = "recover"
     if recovery is not False and recovery not in ("stop", "recover"):

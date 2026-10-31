@@ -33,6 +33,19 @@ class LogitBias(unittest.TestCase):
         self.assertEqual(len(normalize(entries, 248320)), 103215)
         self.assertEqual(engine_key(entries).count(':-100'), 103215)
 
+    def test_large_map_memo(self):
+        big = {str(i): -100 for i in range(1000)}
+        self.assertEqual(normalize(big, 248320), normalize(dict(big), 248320))
+        first = normalize(big, 248320)
+        first[0] = 5.0                                             # callers own their copy
+        self.assertEqual(normalize(big, 248320)[0], -100.0)
+        self.assertEqual(engine_key(big), engine_key(list(big.items())))
+        with self.assertRaises(ValueError):                        # a different vocab bound revalidates
+            normalize(big, 500)
+        self.assertEqual(len(normalize(big, 248320)), 1000)
+        small = {"7": -100, "9": 2.5}
+        self.assertEqual(normalize(small, 10), {7: -100.0, 9: 2.5})  # small maps keep the plain path
+
     def test_capability_and_batch(self):
         for engine in [SimpleNamespace(info={}), SimpleNamespace(info={'logit_bias': 1}, batch=2)]:
             with self.assertRaises(ValueError):

@@ -86,6 +86,9 @@ if errorlevel 1 (echo Could not prepare image source cache.& if not defined STRA
 "%PYTHON%" "%STRATA_ROOT%tools\patch_nvfp4_response_guard.py" "%FORK_ROOT%\serve\server.py"
 if errorlevel 1 (echo Could not prepare Messages response delivery.& if not defined STRATA_SUPERVISOR_CHILD pause& exit /b 27)
 
+"%PYTHON%" "%STRATA_ROOT%tools\patch_nvfp4_cjk_ban.py" "%FORK_ROOT%\serve\server.py"
+if errorlevel 1 (echo Could not prepare the CJK token ban.& if not defined STRATA_SUPERVISOR_CHILD pause& exit /b 32)
+
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$c=Get-NetTCPConnection -State Listen -LocalPort 8080 -ErrorAction SilentlyContinue; if ($c) { $c | Select-Object LocalAddress,LocalPort,OwningProcess | Format-Table -AutoSize; exit 1 } else { exit 0 }"
 if errorlevel 1 (echo Port 8080 is occupied or could not be checked. No process was stopped.& if not defined STRATA_SUPERVISOR_CHILD pause& exit /b 19)
 

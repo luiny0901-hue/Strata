@@ -79,5 +79,6 @@
   "reasoning_budget_tokens": 8192,
   "reasoning_close_retry": true,
   "effort_position": "end",
-  "anthropic_response_guard": true
+  "anthropic_response_guard": true,
+  "ban_cjk_tokens": true
 }
