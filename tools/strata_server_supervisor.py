@@ -284,6 +284,7 @@ class Supervisor:
         self.persistence_error = None
         self.updates = updates
         self.update_worker = None
+        self.compact_worker = None
         checkpoint = directory / 'restart.json'
         if checkpoint.exists():
             self.job = json.loads(checkpoint.read_text(encoding='utf-8'))
@@ -355,6 +356,37 @@ class Supervisor:
                 raise
         if self.client_home is not None:
             configure_client_context(self, self.client_home)
+        self.start_session_compaction()
+
+    def start_session_compaction(self):
+        """Opt-in: compact sessions oversized for the now-smaller server window after READY.
+
+        A daemon thread keeps compaction (minutes of summarizing) off the restart
+        path; only ~/.config/strata/server-control/session-compact.enabled turns it on.
+        """
+        marker = Path.home() / '.config' / 'strata' / 'server-control' / 'session-compact.enabled'
+        if not marker.is_file():
+            return
+        if self.compact_worker is not None and self.compact_worker.is_alive():
+            return
+        tool = Path(__file__).with_name('strata_session_compact.py')
+        if not tool.is_file():
+            print('Session compaction is enabled but strata_session_compact.py is missing.', flush=True)
+            return
+        receipt = self.directory / 'session-compact.json'
+        command = [sys.executable, '-B', '-X', 'utf8', str(tool), '--apply',
+                   '--receipt', str(receipt)]
+        def run():
+            try:
+                result = subprocess.run(command, capture_output=True, timeout=3600)
+                note = (result.stdout.decode('utf-8', 'replace').strip().splitlines() or [''])[-1]
+                if result.returncode:
+                    note += ' ' + result.stderr.decode('utf-8', 'replace').strip()[-400:]
+                print('Session compaction finished (exit ' + str(result.returncode) + '): ' + note, flush=True)
+            except (OSError, subprocess.SubprocessError) as exc:
+                print('Session compaction failed: ' + str(exc)[-300:], flush=True)
+        self.compact_worker = threading.Thread(target=run, daemon=True, name='session-compact')
+        self.compact_worker.start()
 
     def watch_updates(self):
         # Only this owner watches; a release never triggers a live restart.
