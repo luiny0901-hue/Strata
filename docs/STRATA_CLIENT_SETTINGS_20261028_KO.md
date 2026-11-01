@@ -95,6 +95,14 @@ Claude Desktop Code의 작업 체크리스트는 앱 내장 `mcp__ccd_turn__upda
 - Codex에는 `--codex-only`로 실제 적용(변경 2개, 백업 `~/.codex/backups/strata-opencodex-20261031T230844569092Z`, 재적용 0개, audit 통과). Claude 전역 지침은 이 worktree에서 `setup`을 다시 적용하면 main 체크아웃 기준 설치본보다 오래된 문구로 되돌아갈 수 있어 설정기가 거부했고, 전체 재생성 대신 설치된 `~/.claude/CLAUDE.md`에 빠져 있던 wrap_up 항목 복원과 계획 유지 항목 추가만 했다. 두 설치 지침 파일에 항목이 1회 존재함을 확인했고 관련 검사 40개 통과. 이후 어느 쪽 `setup`도 해시 불일치로 재확인을 요구한다.
 - 미검증: 새 Codex·ChatGPT 대화에서 체크리스트 기준을 따르는지, CLI headless 도구 목록은 모델 자기 보고라 완전성은 보장하지 않는다. Claude Desktop의 체크리스트 렌더링 자체는 앱 소유이며 저장소 변경 없이 이미 동작 중이다.
 
+### 2026-11-02: 65,536/32,768 증정의 262K·1M·ON·OFF 전체 적용과 누락 보정
+
+사용자 지적대로 32,000→65,536 증정이 일부 경로에서 되돌려지는 것을 확인했다. `context_limits()`가 `min(32000, context//4)`로 계산해 **컨텍스트 전환(supervisor의 `sync_client_context` 포함) 때마다 settings.json과 게이트웨이를 32,000으로 재투영**했다. ON 템플릿에만 사다리 xhigh/max가 있고 **OFF 템플릿에는 빠져 있었다**(262K·1M 공통).
+
+보정: `claude_code_support.context_limits`(체크아웃·운영 루트)와 운영 루트 `claude_code_client.context_limits`를 `min(65536, context//4)`로 변경(262144 이상이면 65,536, 낮은 컨텍스트는 4분의 1 유지). ON·OFF 템플릿 네 곳(체크아웃·운영 루트) 모두 사다리 `low 3072/medium 4096/high 8192/xhigh 16384/max 32768` 확인·추가. settings.json 출력 재설정과 게이트웨이 재투영(백업 `strata-provider-o694q16b.json`)으로 `--check`의 output 65536·실패 검사 0개. Codex 카탈로그는 1,048,576·6단계(low~max+ultra) 유지이며 카탈로그에는 출력 필드가 없다. OFF·ON의 262K 렌더가 오프라인(파일·GPU 변경 없음)에서 사다리·컨텍스트를 확인했다.
+
+테스트 기대값 3곳도 현재 동작에 맞게 보정: 컨텍스트 표(262144→65536 등), 템플릿 vram 448→768(1M 도입 커밋 896170ee 이후 낡은 값), 운영 루트 UserPromptSubmit 훅 기대값(관리 언어 알림이 매 프롬프트 탑재되는 현재 정책). 관련 검사 체크아웃 143개·운영 루트 해당 묶음 통과. 반영 후 Claude CLI(exit 0·정답)와 Codex CLI(exit 0) 왕복이 계속 성공했다. 새 한도는 새 세션부터 사용된다. **증정 자체의 품질 이득은 여전히 미측정이며**, 262K·OFF 실행기 실기동(재시작)은 이번 점검에서 하지 않았다 — 템플릿 렌더 검증까지가 확인 범위다. 커밋 없음.
+
 ### 기술 선택·성능 검증 기준 보강 (2026-11-01)
 
 기존 Claude·Codex 설치 지침 모두 구현 편의보다 대상 기기의 성능·자원 기준을 우선하고, 알고리즘·자료구조·입출력 병목부터 확인하도록 되어 있었다. 이번에는 `examples/claude/KOREAN_INSTRUCTIONS.md`의 기존 `구현 범위` 절에 두 항목만 추가했다. Claude 생성기는 이 절을 포함하며 Codex 생성기도 `scope_policy()`로 같은 절을 직접 포함하므로 별도 정책 파일이나 모델별 설정을 만들지 않았다.

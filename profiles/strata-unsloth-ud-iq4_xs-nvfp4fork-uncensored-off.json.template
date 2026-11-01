@@ -69,6 +69,7 @@
   },
   "anthropic_thinking": "on_request",
   "reasoning_budget_tokens": 8192,
+  "anthropic_effort_budgets": {"low": 3072, "medium": 4096, "high": 8192, "xhigh": 16384, "max": 32768},
   "reasoning_close_retry": true,
   "effort_position": "end"
 }

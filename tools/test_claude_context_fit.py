@@ -21,8 +21,9 @@ class ClaudeContextFitTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr.decode('utf-8', errors='replace'))
 
     def test_compaction_window_uses_the_model_window_without_a_second_output_reserve(self):
-        for context, expected in ((262144, (32000, 262144)),
-                                  (131072, (32000, 131072)),
+        for context, expected in ((1048576, (65536, 1000000)),
+                                  (262144, (65536, 262144)),
+                                  (131072, (32768, 131072)),
                                   (100000, (25000, 100000)),
                                   (65536, (16384, 'auto'))):
             with self.subTest(context=context):
@@ -38,7 +39,7 @@ class ClaudeContextFitTests(unittest.TestCase):
                 self.assertEqual(profile.get('effort_position'), 'end')
                 args = profile['args']
                 self.assertEqual(args[args.index('--max-context')+1], '262144')
-                self.assertEqual(args[args.index('--vram-reserve-mib')+1], '448')
+                self.assertEqual(args[args.index('--vram-reserve-mib')+1], '768')
 
     def test_rendered_profiles_keep_the_output_headroom_policy(self):
         with tempfile.TemporaryDirectory() as directory:

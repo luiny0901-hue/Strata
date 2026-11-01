@@ -26,7 +26,9 @@ def write_changed(path: Path, data: str) -> None:
 
 
 def context_limits(context: int) -> tuple[int, int | str]:
-    output = min(32000, context // 4)
+    # 65,536 matches Qwen3-Coder's 32,768-class generations with room for a long
+    # answer, and context//4 keeps at least 3/4 of the window usable as prompt.
+    output = min(65536, context // 4)
     # Claude reserves its own compaction buffer inside this window. Subtracting
     # output here a second time shrinks the model window shown by Desktop Code.
     window = min(context, 1000000) if context >= 100000 else 'auto'
