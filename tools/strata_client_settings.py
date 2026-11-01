@@ -330,6 +330,16 @@ def sync_context(home, *, runtime=None):
             raise ValueError('Codex 카탈로그/압축 기준이 서버 한도와 다릅니다.')
         phase = 'desktop'
         desktop = sync_desktop_context(home, base, model, timeout=CONTEXT_SYNC_CALL_TIMEOUT_SECONDS)
+        if claude_selected and isinstance(desktop.get('wire_model'), str) and desktop['wire_model']:
+            # Claude validates model names itself: the CLI env carries the gateway-known
+            # wire name (the gateway maps it to Strata); settings.model keeps the provider id.
+            wire = desktop['wire_model']
+            for name in ('ANTHROPIC_MODEL', 'ANTHROPIC_SMALL_FAST_MODEL', 'CLAUDE_CODE_SUBAGENT_MODEL',
+                         'ANTHROPIC_CUSTOM_MODEL_OPTION', 'ANTHROPIC_DEFAULT_OPUS_MODEL',
+                         'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL'):
+                if env.get(name) in (model, wire):
+                    env[name] = wire
+            files[path] = json.dumps(settings, ensure_ascii=False, indent=2)+'\n'
         phase = 'local_settings'
         backup, changed = shared.publish_files(files, profile, before)
     except (OSError, ValueError, RuntimeError) as exc:

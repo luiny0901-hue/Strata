@@ -108,6 +108,15 @@ Claude Desktop Code의 작업 체크리스트는 앱 내장 `mcp__ccd_turn__upda
 
 현재 체크아웃의 진단 산출물(버전 관리 제외): [Claude 최종 영수증](../.strata-mcp/autonomy-check-20261101/claude-standalone-summary.json), [Codex 최종 영수증](../.strata-mcp/autonomy-check-20261101/codex-summary.json), [Claude 독립 검사](../.strata-mcp/autonomy-check-20261101/claude-standalone-tests.log), [Codex 독립 검사](../.strata-mcp/autonomy-check-20261101/codex-tests.log). 단순 계산 수정의 도구 왕복·검증 증거이며, 새 ChatGPT Desktop 대화에서 같은 수정을 끝내는 시험·장시간 작업·1M 압축 경계·재부팅 복구·다른 OS는 이번에 실행하지 않았다. 커밋·푸시하지 않았다.
 
+### 262K·1M × ON·OFF 4상태 확인 (2026-11-02)
+
+실행 진입(262K ON/OFF, `-on-1m`/`-off-1m`, managed ON/OFF)은 4상태 모두 존재하며, managed 모드에서는 supervisor가 READY마다 `--sync-client-context`로 실제 서버 한도(컨텍스트·출력·추론 단계)를 네 앱 투사값에 반영한다(`strata_server_supervisor.sync_client_context` → `strata_client_settings --sync-runtime`, 전환 왕복 검사는 클라이언트 설정 테스트의 1048576↔262144 케이스).
+
+- 발견·수정 1: 오늘 01:26 기동분의 클라이언트 동기화가 실패로 기록돼 있었다. 원인은 운영 체크아웃(`C:/Users/luiny/Strata`)의 실행 사본이 세대 불일치(`strata_client_settings`은 신규, `claude_code_guidance`는 `language_reminder` 이전)였던 것. 운영 사본 5개(위 두 파일 + `claude_opencodex_client`·`claude_code_support`·`claude_mcp_config` + `claude_mcp`의 searxng/exa)를 worktree 정본으로 맞췄고(백업 `~/.claude/backups/main-checkout-tools-20261102T015404Z/`), supervisor 형태 동기화 재실행으로 성공(투사 1건 보정, 백업 유지)을 확인했다. 내재 방지책으로 supervisor가 도구 쌍의 import를 검사하고 설치 소유자(path: hook/project)로 물러나는 폴백을 더했다(supervisor 테스트 28개).
+- 발견·수정 2: 일반 터미널의 Claude CLI가 `unrecognized_model: strata/…`로 연결 실패였다(Desktop은 게이트웨이 wire 이름을 써서 무사). 동기화가 CLI 환경 모델 키들(`ANTHROPIC_MODEL` 등 7종 중 Strata를 가리키던 값)은 게이트웨이가 아는 wire 이름으로, `settings.model`은 공급자 ID로 유지하도록 `sync_context`를 고쳤다(설정 테스트 24개, 일반 `claude -p` 기본 설정으로 exit 0 재현).
+- 현재 상태 실측: 서버는 1M ON 로드(health), Desktop Code는 본 세션 정상, Codex CLI 기본 실행 종료 0, Claude CLI 격리 실행 종료 0. 262K/OFF 상태 자체의 첫 전환 실시는 이번에도 미실시(세션이 서버를 점유해 전환 대기).
+- 남은 과제: 두 체크아웃이 같은 사용자의 `AGENTS.md`·`config.toml` 블록을 같은 소유자로 재적용하는 문제 — 지침 텍스트가 바뀐 뒤 `--codex-only`가 MCP 블록의 이전-값 보호에서 거부하므로(`audit.codex_guidance=false`, 앱 동작은 정상이며 블록 실제 생성자 확인 후 해시 재확인이 필요), 운영 코드를 한 소유로 통합한 뒤 재적용한다.
+
 ### Codex 저장 기본 모델 Strata 지정 (2026-11-01 저녁, 사용자 요청)
 
 Codex CLI와 ChatGPT Desktop의 저장 기본 모델이 `gpt-6-astra`로 남아 있어 대화가마다 선택을 요구했다. 사용자가 "코딩 앱이 OpenCodex로 Strata에 바로 연결되어 있게 해달라"고 요청해 `~/.codex/config.toml`의 `model` 한 줄을 `strata/qwen3.8-flash-next-unsloth-ud-iq4_xs`로 바꿨다(백업 `~/.codex/backups/manual-strata-default-20261101T110034Z/config.toml`). 경유 주소는 기존 `http://127.0.0.1:10100/v1`(OpenCodex) 그대로이고 다른 키는 건드리지 않았다.

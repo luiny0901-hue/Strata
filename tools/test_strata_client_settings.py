@@ -67,6 +67,29 @@ class ClientSettingsTests(unittest.TestCase):
                 self.assertEqual(result['claude_compaction_window'], compact)
                 self.assertEqual(health.call_count, 1)
 
+    def test_cli_env_uses_the_gateway_wire_name_a_plain_claude_accepts(self):
+        self.settings['env'].update(ANTHROPIC_MODEL='strata/test', ANTHROPIC_SMALL_FAST_MODEL='strata/test',
+                                    ANTHROPIC_DEFAULT_OPUS_MODEL='strata/test', ANTHROPIC_DEFAULT_HAIKU_MODEL='other/model')
+        self.write('.claude/settings.json', self.settings)
+        runtime = {'model': 'test', 'context': 1048576, 'max_output_tokens': 32000,
+                   'base_url': 'http://127.0.0.1:8080/v1', 'images': True, 'api_key': 'private-fixture'}
+
+        def editor(home, base, route, **kwargs):
+            data = clients.shared.read_json(home/'.opencodex/config.json')
+            data['providers']['strata'] = kwargs['body']['provider']
+            self.write('.opencodex/config.json', data)
+            return {'success': True}, None
+        with patch.object(clients, 'runtime_metadata', return_value=runtime), \
+                patch.object(clients.shared, 'management_json', side_effect=editor), \
+                patch.object(clients, 'sync_desktop_context', return_value={'wire_model': 'claude-fixture-5'}):
+            clients.sync_runtime(self.home)
+        saved = clients.shared.read_json(self.home/'.claude/settings.json')
+        self.assertEqual(saved['model'], 'strata/test')          # the audit's provider id stays authoritative
+        self.assertEqual(saved['env']['ANTHROPIC_MODEL'], 'claude-fixture-5')
+        self.assertEqual(saved['env']['ANTHROPIC_SMALL_FAST_MODEL'], 'claude-fixture-5')
+        self.assertEqual(saved['env']['ANTHROPIC_DEFAULT_OPUS_MODEL'], 'claude-fixture-5')
+        self.assertEqual(saved['env']['ANTHROPIC_DEFAULT_HAIKU_MODEL'], 'other/model')  # foreign selection preserved
+
     def test_runtime_switch_reads_actual_model_port_output_and_small_context(self):
         self.settings['env'].update(ANTHROPIC_MODEL='strata/test',
                                    ANTHROPIC_DEFAULT_SONNET_MODEL='another/model')

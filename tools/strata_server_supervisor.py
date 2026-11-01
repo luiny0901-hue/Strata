@@ -609,6 +609,31 @@ def control_handler(supervisor, token, desktop=None, desktop_error=None):
     return Handler
 
 
+def tool_usable(tool: Path) -> bool:
+    """True only when the tool and its module pair actually import (a stale untracked copy cannot)."""
+    try:
+        probe = subprocess.run([sys.executable, '-B', '-c',
+                                'import sys; sys.path.insert(0, sys.argv[1]); import strata_client_settings',
+                                str(tool.parent)], capture_output=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return probe.returncode == 0
+
+
+def fallback_tool(state_path: Path):
+    """The installed integration owner (hook path, then maintenance project), when its tool imports cleanly."""
+    import re
+    state = json.loads(state_path.read_text(encoding='utf-8'))
+    candidates = []
+    hook = re.search(r'"([^"\r\n]*[\\/]claude_opencodex_client\.py)"', state.get('hook_command', ''))
+    if hook:
+        candidates.append(Path(hook[1]).with_name('strata_client_settings.py'))
+    project = state.get('maintenance_mcp', {}).get('project')
+    if isinstance(project, str):
+        candidates.append(Path(project) / 'tools' / 'strata_client_settings.py')
+    return next((candidate for candidate in candidates if tool_usable(candidate)), None)
+
+
 def sync_client_context(home, *, server_url=None, api_key_file=None, model=None):
     """Use the already-installed client integration owner, not a second config writer."""
     state_path = home / '.claude' / 'strata-opencodex.json'
@@ -616,17 +641,11 @@ def sync_client_context(home, *, server_url=None, api_key_file=None, model=None)
         print('Local Claude integration is not configured; remote clients must sync their own context.', flush=True)
         return
     tool = Path(__file__).with_name('strata_client_settings.py')
-    if not tool.is_file():
-        state = json.loads(state_path.read_text(encoding='utf-8'))
-        import re
-        hook = re.search(r'"([^"\r\n]*[\\/]claude_opencodex_client\.py)"', state.get('hook_command', ''))
-        if hook:
-            tool = Path(hook[1]).with_name('strata_client_settings.py')
-        project = state.get('maintenance_mcp', {}).get('project')
-        if not tool.is_file() and not isinstance(project, str):
+    if not tool_usable(tool):  # a stale copy here would fail on every import the same way a missing one would
+        alternate = fallback_tool(state_path)
+        if alternate is None and not tool.is_file():
             raise RuntimeError('Cannot locate the installed Strata client configuration owner')
-        if not tool.is_file():
-            tool = Path(project) / 'tools' / 'strata_client_settings.py'
+        tool = alternate or tool  # present but broken: running it reports its real import error
     command = [sys.executable, '-B', '-X', 'utf8', str(tool), '--sync-runtime']
     if server_url is not None:
         command += ['--server-url', server_url, '--api-key-file', str(api_key_file)]

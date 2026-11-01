@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import socket
+import subprocess
 import sys
 import tempfile
 import threading
@@ -12,7 +13,8 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-from tools.strata_server_supervisor import Supervisor, OwnedProcess, BoundedLog, control_handler, owner_lock, configure_client_context
+from tools.strata_server_supervisor import (Supervisor, OwnedProcess, BoundedLog, control_handler, owner_lock,
+                                            configure_client_context, sync_client_context)
 
 REAL_SESSION_COMPACTION = Supervisor.start_session_compaction
 
@@ -383,6 +385,46 @@ class SupervisorTests(unittest.TestCase):
             self.assertIsNone(other.process.child)
         finally:
             other.log.close()
+
+class ClientContextToolSelection(unittest.TestCase):
+    """The READY server's sync must survive a stale copy of the tool inside the running checkout."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix='strata-sync-tool-')
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.state = self.root/'.claude/strata-opencodex.json'
+        self.state.parent.mkdir()
+        self.healthy = self.root/'installed-owner'
+
+    def stub(self):
+        def fake(command, **kwargs):
+            if command[2] == '-c':      # the import probe: healthy directory only
+                return subprocess.CompletedProcess(command, 0 if command[-1] == str(self.healthy) else 1)
+            self.assertIn('--sync-runtime', command)
+            self.assertEqual(command[4], str(self.healthy/'strata_client_settings.py'))
+            return subprocess.CompletedProcess(command, 0, stdout=b'{}')
+        return fake
+
+    def test_stale_operating_copy_falls_back_to_the_installed_owner(self):
+        self.state.write_text(json.dumps({'hook_command': 'python "%s"' % (self.healthy/'claude_opencodex_client.py')}),
+                              encoding='utf-8')
+        with patch('tools.strata_server_supervisor.subprocess.run', side_effect=self.stub()):
+            self.assertEqual(sync_client_context(self.root, server_url='http://127.0.0.1:8080',
+                                                 api_key_file=self.root/'k', model='fixture'), {})
+
+    def test_broken_copy_without_a_fallback_reports_the_real_failure(self):
+        self.state.write_text('{}', encoding='utf-8')
+        def fake(command, **kwargs):
+            if command[2] == '-c':
+                return subprocess.CompletedProcess(command, 1)   # both the local copy and the probe fail
+            self.assertEqual(command[4], str(Path(strata_server_supervisor.__file__).with_name('strata_client_settings.py')))
+            return subprocess.CompletedProcess(command, 1, stdout=b'', stderr=b'boom')
+        import tools.strata_server_supervisor as strata_server_supervisor
+        with patch('tools.strata_server_supervisor.subprocess.run', side_effect=fake):
+            with self.assertRaisesRegex(RuntimeError, 'boom'):
+                sync_client_context(self.root)
+
 
 if __name__=='__main__':
     unittest.main()
