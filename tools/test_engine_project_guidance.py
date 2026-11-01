@@ -25,7 +25,7 @@ class EngineGuidanceTests(unittest.TestCase):
 
     def test_global_ui_and_game_rules_are_available_to_remote_client_setup(self):
         text=(ROOT/'examples/claude/KOREAN_INSTRUCTIONS.md').read_text(encoding='utf-8')
-        self.assertIn('최신 공식 플랫폼 지침',text)
+        self.assertIn('기존 디자인 시스템·공식 플랫폼 지침',text)  # 7c6e907a 이후 문구
         self.assertIn('반응형',text)
         self.assertIn('접근성',text)
         self.assertIn('대표 플레이 구간',text)
