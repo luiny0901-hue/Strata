@@ -76,6 +76,46 @@ class SharedClaudeTests(unittest.TestCase):
                 self.assertEqual(observed['desktop']['tool_search']['enabled_in_profile'],enabled)
                 self.assertEqual(observed['desktop']['tool_search']['runtime_status'],'not_verified')
 
+    def test_doctor_accepts_the_gateway_wire_alias_in_the_cli_env(self):
+        profile_path = self.home/'desktop'/'configLibrary'
+        profile_path.mkdir(parents=True)
+        profile_id = '6f0a1b2c-3d4e-4f50-8a6b-7c8d9e0f1a2b'
+        (profile_path/'_meta.json').write_text(json.dumps({'appliedId': profile_id}), encoding='utf-8')
+        (profile_path/(profile_id+'.json')).write_text(json.dumps({
+            'inferenceProvider':'gateway','inferenceGatewayBaseUrl':'http://127.0.0.1:10100',
+            'inferenceModels':[{'name':'claude-fable-test','isFamilyDefault':True}]}), encoding='utf-8')
+        open_config = shared.read_json(self.home/'.opencodex/config.json')
+        open_config['claudeCode'] = {'desktopProfile': {'defaults': {'opus': 'strata/qwen-test'}}}
+        (self.home/'.opencodex/config.json').write_text(json.dumps(open_config), encoding='utf-8')
+        settings_path = self.home/'.claude/settings.json'
+        with patch.dict(os.environ, {'CLAUDE_3P_CONFIG_LIBRARY': str(profile_path)}):
+            self.setup_shared()
+            # sync_context writes the wire name to the CLI env keys while keeping
+            # settings.model at the provider id. Doctor accepts that split state.
+            settings = shared.read_json(settings_path)
+            for name in ('ANTHROPIC_MODEL', 'ANTHROPIC_SMALL_FAST_MODEL', 'CLAUDE_CODE_SUBAGENT_MODEL',
+                         'ANTHROPIC_CUSTOM_MODEL_OPTION', 'ANTHROPIC_DEFAULT_OPUS_MODEL',
+                         'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL'):
+                settings['env'][name] = 'claude-fable-test'
+            settings_path.write_text(json.dumps(settings), encoding='utf-8')
+            ready = self.diagnose_shared()
+            self.assertTrue(ready['checks']['shared_model'])
+            self.assertTrue(ready['ready'])
+
+            # A name the gateway profile does not report is still a mismatch.
+            settings['env']['ANTHROPIC_MODEL'] = 'claude-fable-other'
+            settings_path.write_text(json.dumps(settings), encoding='utf-8')
+            report = self.diagnose_shared()
+            self.assertFalse(report['checks']['shared_model'])
+            self.assertFalse(report['ready'])
+
+            # Settings selecting another model stays a mismatch even for the wire name.
+            settings['model'] = 'other/provider-model'
+            settings['env']['ANTHROPIC_MODEL'] = 'claude-fable-test'
+            settings_path.write_text(json.dumps(settings), encoding='utf-8')
+            report = self.diagnose_shared()
+            self.assertFalse(report['checks']['shared_model'])
+
     def test_invalid_desktop_profile_is_reported_without_crashing_common_diagnosis(self):
         profile_path=self.home/'desktop'/'configLibrary'
         profile_path.mkdir(parents=True)

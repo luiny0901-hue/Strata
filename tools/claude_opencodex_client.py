@@ -1338,7 +1338,7 @@ def diagnose(home):
         and transport['native_messages_configured']
         and messages_tool_search_compatible(transport['messages_route_preview']))
     checks = {'shared_route': env.get('ANTHROPIC_BASE_URL') == base,
-              'shared_model': settings.get('model') == env.get('ANTHROPIC_MODEL') == model,
+              'shared_model': settings.get('model') == model,
               'context': 4096 <= configured <= context,
               'managed_mcp_configuration': mcp_configured,
               'managed_mcp_permission_configuration': mcp_permissions_configured,
@@ -1372,6 +1372,12 @@ def diagnose(home):
     except (OSError, ValueError, TypeError, AttributeError):
         info = {'available': True, 'ready': False, 'status': 'invalid_profile'}
     desktop_ready = bool(info['ready'])
+    # sync_context projects the gateway-known wire name onto the seven CLI env keys
+    # while settings.model keeps the provider id. The doctor accepts either form,
+    # but only a wire name this gateway profile actually reports as its default.
+    wire_names = [name for name in (info.get('default_wire_models') or []) if isinstance(name, str)]
+    if env.get('ANTHROPIC_MODEL') not in (model, *wire_names):
+        checks['shared_model'] = False
     # Saved cross-client differences are setup diagnostics, not Claude readiness
     # gates. A malformed/uninstalled Codex client must not break Claude's doctor.
     try:
