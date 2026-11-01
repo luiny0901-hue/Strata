@@ -130,3 +130,16 @@ Claude Desktop Code의 작업 체크리스트는 앱 내장 `mcp__ccd_turn__upda
 Codex CLI와 ChatGPT Desktop의 저장 기본 모델이 `gpt-6-astra`로 남아 있어 대화가마다 선택을 요구했다. 사용자가 "코딩 앱이 OpenCodex로 Strata에 바로 연결되어 있게 해달라"고 요청해 `~/.codex/config.toml`의 `model` 한 줄을 `strata/qwen3.8-flash-next-unsloth-ud-iq4_xs`로 바꿨다(백업 `~/.codex/backups/manual-strata-default-20261101T110034Z/config.toml`). 경유 주소는 기존 `http://127.0.0.1:10100/v1`(OpenCodex) 그대로이고 다른 키는 건드리지 않았다.
 
 검증: `--model` 인수 없이 실행한 `codex exec`이 종료 0·`model: strata/...` 표시·응답 OK였다(추론 수준만 `low`로 덮어쓴 짧은 시험). `clients --check`은 `configured=true`, 항목 11개 전부 true, `codex_model_selection: strata_selected`였다. 반영 범위는 새 Codex 세션과 ChatGPT Desktop 재시작 이후이며, 열려 있던 대화의 선택은 그대로다. Claude Code CLI와 Desktop Code는 이전부터 게이트웨이·env가 OpenCodex 기본이라 변경이 없다. 외부 PC의 통합 설치기는 기존 설계대로 그 PC의 모델 선택을 보존하므로 이 기본값 변경이 자동 반영되지 않는다.
+
+### 클라이언트별 고정 컨텍스트와 doctor 별칭 확인 (2026-11-02)
+
+네 클라이언트(Claude CLI, Desktop Code, Codex CLI, ChatGPT Desktop) 연결 경로를 다시 점검하며 새 세션의 고정 컨텍스트를 실측하고 진단 결함 하나를 고쳤다.
+
+- Claude CLI 새 세션 고정 컨텍스트는 **29,758토큰**이다(빈 폴더, `claude -p "Reply with exactly: OK"`, usage 기준 입력 9,268+캐시 읽기 20,490). 그중 전역 `~/.claude/CLAUDE.md`(60,011바이트) 본문이 **13,284토큰**이다(게이트웨이 `/v1/messages`의 input_tokens 실측, 초소 요청 기준치는 104토큰). 나머지는 Claude Code 자체 시스템 프롬프트와 도구 정의이며 설정기가 줄일 수 있는 범위가 아니다.
+- Codex CLI 고정 컨텍스트는 **입력 21,939토큰**이며 기준 `codex exec`, 켜진 플러그인 11개를 `-c`로 끈 실행, `features.memories=false`를 더한 실행 세 번이 모두 같은 값이었다(OpenCodex 요청 로그, effort=xhigh). 플러그인·메모리는 고정 프롬프트에 0토큰이어서 줄일 것이 없다. ChatGPT Desktop은 CLI와 같은 `~/.codex/config.toml`·게이트웨이 경로를 쓰므로 이 값으로 경로를 갈음했고 GUI 자체는 실행하지 않았다.
+- Desktop Code는 본 세션에서 정상을 확인했다(wire 별칭 `claude-fable-5-p035`→Strata, ToolSearch 지연 로드 동작). 세션 시작 고정값은 별도 측정하지 않았다.
+- 결함 수정: doctor(`claude_opencodex_client.diagnose`, `strata-maintenance.environment_status`와 동일 경로)가 `shared_model`을 env 모델 키·설정 모델·공급자 ID의 세 값 일치로만 봐서, 02시 동기화가 확정 투자한 별칭 상태(env는 wire 이름)에서 실사용은 정상인데 `ready:false`를 보고했다. 이제 설정 모델은 공급자 ID와 비교하고 env 모델 키는 공급자 ID 또는 Desktop 프로필이 기본으로 보고한 wire 이름 중 하나와 일치하면 통과시킨다(테스트 사례 추가, 테스트 파일 84개 통과, 실제 doctor `ready:true`).
+- 이상 관측: Claude CLI 최소 요청 4회 중 1회가 무관한 세션의 작업 문장(AutoPlayer 폴더 확인)을 반환하고 도구 호출까지 수행했다. 이후 재실행 3회는 정확히 "OK"였다. 같은 시각 206–218k 입력의 터미널 CLI 대화가 있었고 이상 실행은 29,729토큰 접두어를 재사용하고 있어 세션 슬롯·접두어 캐시 혼선 가능성을 **원인 미확정**으로 남긴다(재현되지 않음).
+- 생성 지침에 262,144 창·32,000 응답 상한을 현재 값처럼 적던 세 문서를 창 값 중립 표현과 날짜 있는 실측으로 바꾸고 `~/.claude/guidance/maintenance.md`를 원문에 맞춰 갱신했다.
+
+ChatGPT Desktop GUI 실제 조작, 1M 압축 경계, OFF 상태 전환은 이번에 실행하지 않았다. 모델·추론 수준·권한 설정은 변경하지 않았다.
