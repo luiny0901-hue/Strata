@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-17",
+  "target": "NVFP4 fork 0.1.44.1-nvfp4.2 + Unsloth UD-IQ4_XS",
+  "opencode": {
+    "version": "2.0.22",
+    "default_model": "strata/qwen3.8-flash-next-unsloth-ud-iq4_xs",
+    "configured_on_current_pc": true,
+    "api_key_or_config_contents_committed": false,
+    "backup_created": true,
+    "non_target_settings_and_existing_api_key_preserved": true,
+    "repeat_apply": "PASS no-op",
+    "model_registry": "PASS IQ4_XS listed"
+  },
+  "local_setup_validation": {
+    "python_unittest": "PASS 11/11",
+    "template_contract": "PASS ON and OFF at context ceiling 262144",
+    "py_compile": "PASS",
+    "nvfp4_fork_runconfig_on": "PASS projection detected and uncensored true accepted",
+    "nvfp4_fork_runconfig_off": "PASS projection detected and uncensored false accepted",
+    "manifest_non_model_asset_hashes": "PASS 21 files hashed in this run",
+    "model_shard_hashes": "PASS expected hashes from .done markers match official Hugging Face metadata for pinned revision",
+    "full_local_model_hash_reread": "NOT_RUN; verify-assets reads the full model and is provided for a later complete verification"
+  },
+  "historical_open_code_task_results": {
+    "nvfp4_fork_plus_iq4_xs": "PASS task completed; 31/31 independent DOM/localStorage CPU checks",
+    "standard_strata_plus_iq4_xs": "PASS task completed; 25/25 independent DOM/localStorage CPU checks",
+    "nvfp4_fork_plus_dedicated_gptq": "PASS task completed; 28/28 independent DOM/localStorage CPU checks",
+    "raw_project_source_prompts_and_per_request_logs_committed": false
+  },
+  "limits": {
+    "full_262k_context_stress": "NOT_RUN; largest measured prompt 41507 tokens for selected IQ4_XS run",
+    "uncensored_on_off_live_generation": "NOT_RUN; config parser passed, quality effect on UD-IQ4_XS unmeasured in fork notes",
+    "vision_image_request": "NOT_RUN; CPU vision path was configured, no image was supplied in benchmark",
+    "gpu_model_start_in_this_setup_turn": "NOT_RUN",
+    "hosted_ci": "NOT_RUN"
+  },
+  "attempt_history": [
+    "Initial test run: 7 passed, 2 failed, 1 error. Causes were incorrect portable token replacement, temporary fixture missing the pinned model revision, and an assertion that assumed every manifest entry was absent even though the checkout expert profile existed. Fixed and rerun: 10/10 passed; final suite after added tamper-detection and launcher guards: 11/11 passed.",
+    "Initial PowerShell OpenCode model-list assertion did not capture a match. Direct model list output confirmed the IQ4_XS entry; corrected Out-String verification passed.",
+    "Final Windows gate first invoked python via the WindowsApps alias, but its target was unavailable. Re-run with the existing Strata virtual-environment interpreter; all 11 setup unit tests, both template checks, py_compile, and staged diff check passed.",
+    "The first OpenCode model-list check passed an unsupported provider positional argument. Corrected to opencode models; it listed strata/qwen3.8-flash-next-unsloth-ud-iq4_xs.",
+    "The first manual OpenCode config inspection used an older provider/options path. Corrected inspection used providers.strata.settings and confirmed loopback base URL, IQ4_XS registration, key presence, and equality with the pre-change backup without printing the key."
+  ]
+}

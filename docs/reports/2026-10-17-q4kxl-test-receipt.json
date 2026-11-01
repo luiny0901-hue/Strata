@@ -1,0 +1,61 @@
+{
+  "run_date": "2026-10-17",
+  "host": {
+    "os": "Windows",
+    "gpu": "NVIDIA RTX 3090 Ti",
+    "gpu_index": 1,
+    "system_ram_gib": 128,
+    "opencode_version": "2.0.22"
+  },
+  "runtime": {
+    "fork": "sergqwer/strata-nvfp4",
+    "fork_version": "0.1.44.1-nvfp4.2",
+    "model": "unsloth/Qwen3.8-Flash-Next-GGUF:UD-Q4_K_XL",
+    "model_revision": "766911a6b7369840a91dbcd95f9f997acaab6cd6",
+    "configured_context_limit": 262144,
+    "largest_observed_prompt_tokens": 46643,
+    "uncensored_default": false,
+    "refusal_projection_loaded": false,
+    "vision_configured": true,
+    "vision_device": "CPU",
+    "image_sent": false
+  },
+  "agent_task": {
+    "runs": 1,
+    "result": "completed",
+    "elapsed_seconds": 246.8,
+    "tool_calls": 15
+  },
+  "independent_cpu_test": {
+    "command": "node .idea/test-game.js",
+    "passed": 31,
+    "failed": 0,
+    "exit_code": 0,
+    "method": "DOM and localStorage stub",
+    "covered_categories": [
+      "opening and dialogue flow",
+      "save schema and progress persistence",
+      "continue and restore without replay",
+      "malformed or unsupported save data",
+      "unavailable local storage"
+    ]
+  },
+  "not_tested": [
+    "full 262144-token context stress",
+    "browser rendering and visual correctness",
+    "image input and vision output",
+    "new uncensored ON profile live generation"
+  ],
+  "cleanup": {
+    "listener_closed": true,
+    "owned_server_exited": true,
+    "rtx_3090_ti_vram_after_exit_mib": 0,
+    "shutdown_warning": "An ignored Python finalizer OSError [Errno 22] followed the stopped message; listener and GPU checks confirmed exit."
+  },
+  "privacy": {
+    "project_source_included": false,
+    "prompt_or_chat_log_included": false,
+    "open_code_key_included": false,
+    "model_weights_included": false
+  }
+}

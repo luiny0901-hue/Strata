@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "run_date": "2026-10-17",
+  "platform": "Windows",
+  "hardware": {
+    "gpu": "RTX 3090 Ti",
+    "gpu_index": 1,
+    "system_ram_gib": 128
+  },
+  "opencode_version": "2.0.22",
+  "context_ceiling_tokens": 262144,
+  "largest_observed_prompt_tokens": {
+    "standard_iq4xs": 46418,
+    "nvfp4_iq4xs": 41507,
+    "nvfp4_gptq": 46729
+  },
+  "full_context_stress": "NOT_RUN",
+  "vision_path": "CPU encoder enabled; no image supplied; vision validation NOT_RUN",
+  "uncensored_iq4xs_vector": "NOT_USED in scored comparison; current ON/OFF config parser/runtime quality not live-tested",
+  "runs": [
+    {
+      "runtime": "standard Strata",
+      "model": "Unsloth UD-IQ4_XS",
+      "elapsed_s": 216.4,
+      "fresh_prefill_tok_s": 2565.8,
+      "longest_decode_tok_s": 98.1,
+      "weighted_decode_tok_s": 102.3,
+      "tool_calls": 17,
+      "independent_tests": "25/25 PASS"
+    },
+    {
+      "runtime": "NVFP4 fork 0.1.44.1-nvfp4.2",
+      "model": "Unsloth UD-IQ4_XS",
+      "elapsed_s": 165.3,
+      "fresh_prefill_tok_s": 3162.8,
+      "longest_decode_tok_s": 105.9,
+      "weighted_decode_tok_s": 109.3,
+      "tool_calls": 12,
+      "independent_tests": "31/31 PASS"
+    },
+    {
+      "runtime": "NVFP4 fork 0.1.44.1-nvfp4.2",
+      "model": "dedicated NVFP4 GPTQ",
+      "elapsed_s": 233.5,
+      "fresh_prefill_tok_s": 2782.4,
+      "longest_decode_tok_s": 89.0,
+      "weighted_decode_tok_s": 89.2,
+      "tool_calls": 23,
+      "independent_tests": "28/28 PASS"
+    }
+  ],
+  "independent_test_outputs": {
+    "2026-10-17-standard-iq4xs-independent-test.txt": "c50241c27e9383b08e2651ee2eabaad0faf207f7ea24ff2a6d79328134ef5e04",
+    "2026-10-17-nvfp4-iq4xs-independent-test.txt": "4e379b4ae04a29eb9a4d579c7938bf2ac1c7cfc87c3b2873b967e5c65c782942",
+    "2026-10-17-nvfp4-gptq-independent-test.txt": "2bc3393dde53b7f465f30b353f4ad63a2956ca9787a18b0fa06cec0752ef74d6"
+  },
+  "method_limits": [
+    "single coding-task run per model",
+    "different prompt/output lengths",
+    "not repeat-averaged",
+    "DOM/localStorage stub tests only",
+    "no image sent",
+    "not full 262K stress"
+  ],
+  "excluded": [
+    "model weights",
+    "raw prompts",
+    "user project source",
+    "OpenCode API key",
+    "raw per-request logs"
+  ]
+}

@@ -57,7 +57,7 @@ from urllib.parse import parse_qs, urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT))   # run as a script (run-<model>.bat) as well as a module
-from serve.frontend import (THINK_END, ChatTemplate, Event, OutputParser, anthropic_to_messages,  # noqa: E402
+from serve.frontend import (THINK_END, ChatTemplate, Event, OutputParser, anthropic_to_messages, anthropic_tool_cache_prompt,  # noqa: E402
                             forced_call, images_of, literal_tags, mark_think_literals, openai_to_messages,
                             tool_choice_of, unmark_think_literals)
 from serve.mcp import McpCancelled, hub_from_config  # noqa: E402
@@ -65,9 +65,12 @@ from serve import runconfig  # noqa: E402
 from serve import logit_bias as bias_api  # noqa: E402
 from serve.winjob import contain  # noqa: E402
 from serve.structured import StructuredOutputError, prepare_format, validated_json  # noqa: E402
+from serve.anthropic_response_guard import configure_response_guard, guard_anthropic_events  # STRATA_ANTHROPIC_RESPONSE_GUARD_V1
+from serve.cjk_ban import configure_cjk_ban  # STRATA_CJK_BAN_V1
 from serve import responses as responses_api  # noqa: E402
 from serve.responses import ResponsesError, error_body as responses_error_body  # noqa: E402
 from serve import images as images_api  # noqa: E402
+from serve.anthropic_compaction import concise_compaction_request  # noqa: E402
 
 IM_END = "<|im_end|>"
 IMAGE_PAD = "<|image_pad|>"
@@ -193,21 +196,27 @@ def reasoning_repeat_coverage(text):
 
 
 def focused_recovery_prompt(tok, ids, generated):
-    """The prompt's ids with the xhigh effort sentence of the first system message replaced by the low one, then
-    every token generated so far.  A splice of token ids: the prompt is never decoded and encoded again, so a literal
-    `</think>` or vision marker in it (#537, #554) stays what it was.  None when the sentence is not there as whole
-    tokens in the first system message (a user's text never counts).  No answer or end-of-thinking is inserted."""
+    """Return the original prompt with low-effort guidance in its first system message, then generated ids.
+
+    Replace a recognized effort sentence when present; otherwise insert the guidance after the system header. This
+    keeps recovery independent of the client's selected effort level. The prompt is spliced as token ids, never
+    decoded/re-encoded, so literal think or vision markers remain unchanged. User text is never rewritten.
+    """
     end = tok.encode(IM_END, parse_special=True)
-    if len(end) != 1 or end[0] not in ids:
+    system = tok.encode('<|im_start|>system\n', parse_special=True)
+    if len(end) != 1 or len(system) > len(ids) or ids[:len(system)] != system or end[0] not in ids:
         return None
     head = ids[:ids.index(end[0])]
-    if not tok.decode(head).startswith("<|im_start|>system\n"):
-        return None
-    old, new = tok.encode(HIGH_EFFORT, parse_special=False), tok.encode(LOW_EFFORT, parse_special=False)
-    for i in range(len(head) - len(old) + 1):
-        if head[i:i + len(old)] == old:
-            return ids[:i] + new + ids[i + len(old):] + list(generated)
-    return None
+    new = tok.encode(LOW_EFFORT, parse_special=False)
+    for effort in EFFORT_TEXT.values():
+        old = tok.encode(effort, parse_special=False)
+        for i in range(len(head) - len(old) + 1):
+            if head[i:i + len(old)] == old:
+                return ids[:i] + new + ids[i + len(old):] + list(generated)
+    # API clients need not include Strata's native effort sentence.
+    # Append inside the first system message; if that boundary is malformed, fail closed.
+    separator = tok.encode("\n\n", parse_special=False)
+    return ids[:len(head)] + separator + new + ids[len(head):] + list(generated)
 
 
 LOOPBACK_NAMES = ("localhost", "127.0.0.1", "::1")
@@ -2243,6 +2252,7 @@ class Vision:
         self.stopped = True
         self.lock = threading.Lock()
         self.cache: dict[str, tuple[Path, int]] = {}
+        self.source_cache = {} if cfg.get("source_cache") is True else None
         # opt-in (the vision section's "elastic": true, with the config's "vram_elastic"): the encoder starts with the
         # first picture and stops after elastic_idle_s without one; while it runs, the engine's expert cache keeps
         # elastic_mib of VRAM free for it (Service._vision_up / _vision_idle_down)
@@ -2414,11 +2424,27 @@ class Vision:
     def encode(self, source: str | bytes, keep=()) -> tuple[Path, int]:
         """-> (embeddings file, number of image tokens).  `source`: what load() reads, or the image's bytes.
         `keep`: files the caller still needs (never evicted by this call)."""
-        data = self.normalize(source if isinstance(source, bytes) else self.load(source))
+        aliases = getattr(self, "source_cache", None)
+        raw = source if isinstance(source, bytes) else self.load(source)
+        raw_key = hashlib.sha256(raw).hexdigest() if aliases is not None else None
+        if aliases is not None:
+            with self.lock:
+                cached_key = aliases.get(raw_key)
+                if cached_key in self.cache:
+                    self.cache[cached_key] = self.cache.pop(cached_key)
+                    return self.cache[cached_key]
+        data = self.normalize(raw)
         key = hashlib.sha256(data).hexdigest()[:32]
         with self.lock:
+            def remember_source():
+                if aliases is not None:
+                    aliases.pop(raw_key, None)
+                    aliases[raw_key] = key
+                    while len(aliases) > 64:
+                        aliases.pop(next(iter(aliases)))
             if key in self.cache:
                 self.cache[key] = self.cache.pop(key)                  # most recently used last
+                remember_source()
                 return self.cache[key]
             img, out = self.dir / f"{key}.img", self.dir / f"{key}.sve"
             img.write_bytes(data)
@@ -2436,6 +2462,7 @@ class Vision:
                 raise ValueError("the image could not be read: " + (line[4:] if line.startswith("ERR") else
                                                                      "the vision encoder stopped"))
             self.cache[key] = (out, int(line.split()[1]))
+            remember_source()
             held = {str(p) for p in keep} | {str(out)}
             for old in list(self.cache):                               # oldest first, but never one still in use
                 if len(self.cache) <= 64:
@@ -3033,6 +3060,8 @@ class Service:
         self.aliases: list[str] = []                  # #297: other names of the model (the config's `aliases`)
         self.reasoning_close_retry = False            # #1053 (opt-in): close the thinking once when a reply ends inside it
         self.codex_compaction_cache = False           # #924 (opt-in): a Codex compaction is rendered with its conversation's tools
+        self.anthropic_compact_summary = False        # opt-in: concise Claude Code recovery state, no hard output cap
+        self.anthropic_tool_cache = False             # opt-in: discovered definitions stay beside ToolSearch results
         self.codex_thread_titles = False              # #923 (opt-in): answer Codex's thread-title turns without the engine
         self.sampling_defaults = dict(sampling_defaults or {})   # the run config's `sampling` block
         self.shared = {}                              # the web app's Chat settings for every client (POST /settings)
@@ -6042,14 +6071,23 @@ def make_handler(svc: Service):
             """Anthropic's token count, which Claude Code asks for its context figures: the prompt this server would
             read for the same request, rendered and tokenized - the model does not run."""
             req = svc.with_shared(req, "anthropic")
+            req = concise_compaction_request(req, svc.anthropic_compact_summary)
             messages, tools, kw = anthropic_to_messages(req, svc.anthropic_think_unasked)
             stop_strings(req)                                 # the same 400 as the request itself would get
             check_request_sampling(req)                       # ... likewise a sampling field of the wrong type
+            if svc.anthropic_tool_cache:
+                if tool_choice_of(req.get('tool_choice'))[0] == 'none':
+                    tools = None
+                messages, tools = anthropic_tool_cache_prompt(req, messages, tools)
             self._json(200, {"input_tokens": len(svc.encode_prompt(messages, tools, kw))})
 
         def _anthropic(self, req):
             svc.load()
             req = svc.with_shared(req, "anthropic")
+            compact_req = concise_compaction_request(req, svc.anthropic_compact_summary)
+            if compact_req is not req:
+                print('[strata] Claude compaction format: concise', flush=True)
+            req = compact_req
             messages, tools, kw = anthropic_to_messages(req, svc.anthropic_think_unasked)
             self._no_local_images(messages)
             if tool_choice_of(req.get("tool_choice"))[0] == "none":   # Anthropic's {"type": "none"}: no tools offered
@@ -6061,9 +6099,14 @@ def make_handler(svc: Service):
             check_request_sampling(req)                       # ... and a sampling field of the wrong type
             cancel = threading.Event()
             self._watch_client(cancel)                       # #430 #431 (#1999: before prepare, which can take long)
-            ids, thinking, max_new = svc.prepare(messages, tools, kw, max_new, force=force, req=req, cancel=cancel)
+            shown = tools
+            if svc.anthropic_tool_cache:
+                messages, shown = anthropic_tool_cache_prompt(req, messages, tools)
+            ids, thinking, max_new = svc.prepare(messages, shown, kw, max_new, force=force, req=req, cancel=cancel)
             _debug_req("anthropic", req, messages, tools, max_new, thinking, len(ids))
             events = anthropic_events(svc, req, ids, thinking, tools, max_new, cancel, force=force)
+            events = guard_anthropic_events(events, req, enabled=getattr(svc, "anthropic_response_guard", False),
+                                            with_tools=bool(tools), cancel=cancel, heartbeat_s=KEEPALIVE_S)  # STRATA_ANTHROPIC_RESPONSE_GUARD_V1
             events = self._capture(events, "anthropic")
             if not req.get("stream"):
                 return self._json(200, anthropic_collect(events))
@@ -6081,6 +6124,10 @@ def make_handler(svc: Service):
                 self._note(outcome="disconnected")
                 cancel.set()
                 events.close()
+            except StructuredOutputError as e:  # STRATA_ANTHROPIC_RESPONSE_GUARD_V1
+                err = {"type": "error", "error": {"type": "api_error", "code": "structured_output_failed", "message": str(e)}}
+                self._note(error=err["error"])
+                self.wfile.write(b"event: error\ndata: " + json.dumps(err).encode() + b"\n\n")
             except EngineDied as e:                          # mid-stream: Anthropic's error event
                 err = {"type": "error", "error": {"type": "api_error", "message": f"{e}; the next request restarts it"}}
                 self._note(error=err["error"])
@@ -6798,6 +6845,8 @@ def main() -> int:
                   "Chat settings shared with other apps, can set its own)", flush=True)
     svc.codex_thread_titles = cfg.get("codex_thread_titles") is True    # #923: opt-in, off by default
     svc.codex_compaction_cache = cfg.get("codex_compaction_cache") is True   # #924: opt-in, off by default
+    svc.anthropic_tool_cache = cfg.get('anthropic_tool_cache') is True
+    svc.anthropic_compact_summary = cfg.get('anthropic_compact_summary') is True
     try:
         svc.set_aliases(cfg.get("aliases"))             # #297: other names the model answers to
     except ValueError as e:
@@ -6865,11 +6914,6 @@ def main() -> int:
     if not isinstance(recovery, bool):
         raise SystemExit(f"[strata] config \"tool_call_recovery\" must be true or false, not {recovery!r}")
     svc.tool_call_recovery = recovery
-    etu = cfg.get("env_to_user", False)                # opt-in: see frontend._env_to_user
-    if not isinstance(etu, bool):
-        raise SystemExit(f"[strata] config \"env_to_user\" must be true or false, not {etu!r}")
-    import serve.frontend as _frontend
-    _frontend.ENV_TO_USER = etu
     rs = cfg.get("repeat_stop_tokens", REPEAT_STOP_TOKENS)   # #606: opt-out with 0
     if isinstance(rs, bool) or not isinstance(rs, int) or rs < 0:
         raise SystemExit(f"[strata] config \"repeat_stop_tokens\" must be a whole number >= 0 (0 = off), not {rs!r}")
@@ -6884,7 +6928,9 @@ def main() -> int:
         if budget:
             print(f"[strata] thinking budget: {budget} tokens (reasoning_budget_tokens; a request can set its own)",
                   flush=True)
+    configure_response_guard(svc, cfg.get("anthropic_response_guard", False))  # STRATA_ANTHROPIC_RESPONSE_GUARD_V1
     recovery = cfg.get("reasoning_loop_recovery", False)   # #728: false (default) | "stop" | "recover" (true)
+    configure_cjk_ban(svc, cfg.get("ban_cjk_tokens", False))  # STRATA_CJK_BAN_V1
     if recovery is True:
         recovery = "recover"
     if recovery is not False and recovery not in ("stop", "recover"):
@@ -6948,6 +6994,10 @@ def main() -> int:
         raise KeyboardInterrupt
     try:
         signal.signal(signal.SIGTERM, on_sigterm)
+        # On Windows, closing the console that hosts a .bat server sends CTRL_BREAK, not SIGTERM.
+        # Route it through the same orderly HTTP/engine cleanup path as Ctrl+C.
+        if hasattr(signal, "SIGBREAK"):
+            signal.signal(signal.SIGBREAK, on_sigterm)
     except (ValueError, OSError, AttributeError):         # not the main thread
         pass
     try:

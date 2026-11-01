@@ -4,8 +4,13 @@ rem Needs only an NVIDIA or AMD graphics driver. Python is installed for your us
 setlocal
 title Strata
 cd /d "%~dp0"
-if exist ".venv\Scripts\python.exe" goto run
+rem a .venv copied from another PC points at that PC's Python and cannot start here: start that copy over
+if not exist ".venv\Scripts\python.exe" goto py
+".venv\Scripts\python.exe" --version >nul 2>nul && goto run
+echo  The Python environment in .venv was made on another PC: setting up a new one for this PC ...
+rmdir /s /q .venv
 
+:py
 call :findpy
 if defined PY goto venv
 echo.

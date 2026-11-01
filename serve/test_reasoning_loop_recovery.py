@@ -1,7 +1,7 @@
 """CPU-only regression for opt-in reasoning recovery: python -m unittest serve.test_reasoning_loop_recovery."""
 import threading
 import unittest
-from serve.server import (Service, ByteTokenizer, MockEngine, HIGH_EFFORT,
+from serve.server import (Service, ByteTokenizer, MockEngine, HIGH_EFFORT, LOW_EFFORT, EFFORT_TEXT,
                           reasoning_repeat_coverage, focused_recovery_prompt)
 
 
@@ -53,6 +53,28 @@ class ReasoningLoopRecovery(unittest.TestCase):
         self.assertEqual(prompt[-len(generated):], generated)
         self.assertIn('Solve this unchanged task', self.tok.decode(prompt))
         self.assertNotIn('</think>', self.tok.decode(prompt))
+
+    def test_every_native_effort_sentence_is_lowered(self):
+        for effort, sentence in EFFORT_TEXT.items():
+            with self.subTest(effort=effort):
+                ids = self.tok.encode('<|im_start|>system\n' + sentence +
+                    '<|im_end|>\n<|im_start|>user\nTask<|im_end|>\n<|im_start|>assistant\n<think>\n',
+                    parse_special=True)
+                recovered = focused_recovery_prompt(self.tok, ids, [])
+                self.assertIsNotNone(recovered)
+                self.assertIn(LOW_EFFORT, self.tok.decode(recovered))
+                if sentence != LOW_EFFORT:
+                    self.assertNotIn(sentence, self.tok.decode(recovered))
+
+    def test_missing_native_effort_injects_guidance_only_into_system(self):
+        ids = self.tok.encode('<|im_start|>system\nAgent instructions.\n<|im_end|>\n'
+            '<|im_start|>user\nDo not rewrite this task.\n<|im_end|>\n'
+            '<|im_start|>assistant\n<think>\n', parse_special=True)
+        recovered = focused_recovery_prompt(self.tok, ids, [])
+        text = self.tok.decode(recovered)
+        system_text = text.split('<|im_end|>', 1)[0]
+        self.assertGreater(system_text.index(LOW_EFFORT), system_text.index('Agent instructions.'))
+        self.assertIn('Do not rewrite this task.', text)
 
     def run_case(self, enabled):
         engine = RecordingEngine(self.tok, [self.loop,
@@ -160,7 +182,17 @@ class ReasoningLoopRecovery(unittest.TestCase):
         self.assertEqual(len(engine.calls), 1)
         self.assertEqual(events[-1][1]['reasoning_recoveries'], 0)
 
-    def test_missing_native_high_hint_skips_recovery(self):
+    def test_recovery_works_with_medium_effort_and_no_native_hint(self):
+        engine = RecordingEngine(self.tok, [self.loop])
+        service = Service(engine, self.tok, None)
+        service.reasoning_loop_recovery = True
+        ids = self.tok.encode('<|im_start|>system\nAgent instructions.\n<|im_end|>\n'
+            '<|im_start|>user\nTask<|im_end|>\n', parse_special=True)
+        events = list(service.run(ids, True, [], 40000, {}, threading.Event()))
+        self.assertEqual(len(engine.calls), 2)
+        self.assertEqual(events[-1][1]['reasoning_recoveries'], 1)
+
+    def test_missing_system_message_still_fails_closed(self):
         engine = RecordingEngine(self.tok, [self.loop])
         service = Service(engine, self.tok, None)
         service.reasoning_loop_recovery = True

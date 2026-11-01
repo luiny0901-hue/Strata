@@ -21,6 +21,9 @@ __pycache__/
 
 # Pi harness metadata (local session state, not project source)
 *.sqlite
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
 *.npz
 *.occ1
 td.log
@@ -33,7 +36,13 @@ td.log
 /packs/
 /mtp/
 /run-*.bat
+!/run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-on.bat
+!/run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-off.bat
+!/run-claude-strata.bat
 /run-*.sh
+!/run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-on.sh
+!/run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-off.sh
+!/run-claude-strata.sh
 /strata-*.json
 /strata-*.log
 /build-strata.bat
@@ -61,3 +70,13 @@ build-vision-cuda12.bat
 
 /.ccache/
 /.rocm-win/
+
+# Supported Claude client entry points.
+!/run-claude-opencodex.bat
+!/run-claude-opencodex.sh
+!/run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-on-1m.bat
+!/run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-off-1m.bat
+
+# Local source-integration backups, not distributable runtime assets.
+/serve/.response-guard/
+/serve/.vision-source-cache/

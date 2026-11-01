@@ -1,0 +1,66 @@
+{
+  "result": "PASS",
+  "recorded_at": "2026-10-19T07:40:00+09:00",
+  "verifier": "tools/verify_opencode_context_matrix.py",
+  "execution": "actual OpenCode CLI against an isolated loopback OpenAI-compatible fixture",
+  "scopes": {
+    "opencode_compaction": "PASS",
+    "initial_and_follow_up_file_work": "PASS",
+    "non_elevated_confirmation_resume": "PASS",
+    "production_strata_model_gpu": "NOT_RUN"
+  },
+  "contexts": [
+    {
+      "context": 8192,
+      "keep": 1024,
+      "buffer": 2048,
+      "trigger": 6144,
+      "requests": 10,
+      "checkpoints": 2
+    },
+    {
+      "context": 32768,
+      "keep": 4096,
+      "buffer": 8192,
+      "trigger": 24576,
+      "requests": 10,
+      "checkpoints": 2
+    },
+    {
+      "context": 65536,
+      "keep": 8192,
+      "buffer": 16384,
+      "trigger": 49152,
+      "requests": 10,
+      "checkpoints": 2
+    },
+    {
+      "context": 131072,
+      "keep": 12000,
+      "buffer": 32768,
+      "trigger": 98304,
+      "requests": 10,
+      "checkpoints": 2
+    },
+    {
+      "context": 262144,
+      "keep": 12000,
+      "buffer": 65536,
+      "trigger": 196608,
+      "requests": 10,
+      "checkpoints": 2
+    }
+  ],
+  "additional_regression_attempt": {
+    "initial_command": "python -m unittest discover -s tools -p test_*.py -v",
+    "initial_result": "FAILED",
+    "initial_summary": "855 tests ran; 6 errors; 13 expected platform skips.",
+    "fix_applied": "tools/strata_bench.py now reads the UTF-8 BOM CMakeLists.txt with encoding=utf-8-sig.",
+    "corrective_validation": {
+      "command": "python -m unittest tools.test_strata_bench tools.test_opencode_session_recovery tools.test_verify_opencode_262k_workflow tools.test_verify_opencode_context_matrix tools.test_remote_agent_client -v",
+      "result": "PASS",
+      "summary": "40 tests passed."
+    },
+    "remaining_unverified_full_suite_item": "test_iq_pack requires missing third_party/llama.cpp/gguf-py; the full 855-test suite was not rerun after the encoding fix."
+  }
+}

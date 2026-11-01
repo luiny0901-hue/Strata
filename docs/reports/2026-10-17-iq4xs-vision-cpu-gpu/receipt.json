@@ -1,0 +1,132 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-17",
+  "host": {
+    "os": "Windows",
+    "cpu": "AMD Ryzen Threadripper 3970X, 32 cores / 64 threads",
+    "installed_ram_gib": 128,
+    "inference_gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "inference_gpu_index": 1,
+    "inference_gpu_uuid": "GPU-1f5cc5f8-41f5-0817-46b1-548cf1357b8d",
+    "driver": "616.92",
+    "other_gpu_used_for_inference": false
+  },
+  "runtime": "sergqwer/strata-nvfp4 local release directory v0.1.44.1-nvfp4.2",
+  "model": "Unsloth UD-IQ4_XS",
+  "context_ceiling_tokens": 262144,
+  "engine": {
+    "gpu_index": 1,
+    "vram_reserve_mib": 1280
+  },
+  "image": {
+    "dimensions": [
+      1920,
+      1080
+    ],
+    "max_tokens": 1024,
+    "source_fixture_sha256": "cafbf2a56fd8a449d73d5c013c61a49aa2f505cd710a6b953d6e0be3d4411a56",
+    "request_variants": [
+      {
+        "sha256": "7d48b93b8d6344ea4d8b26d84632b701ebbcd8b1725120abf7dae9df8d9aec48",
+        "bytes": 246593
+      },
+      {
+        "sha256": "ff491d9d0c3a8e7c51cdab0e948457a8b02877e0dbffc76c6a978cd8b576c4be",
+        "bytes": 246594
+      },
+      {
+        "sha256": "b6c1916823535516e4f2674c6b0697bb4f63ded216017858f0b6b80d03d9aa5b",
+        "bytes": 246594
+      },
+      {
+        "sha256": "fab6ce645a69ebbdc92565bdf626a98c6e58cca90aad0382e7fa4e34a9766a57",
+        "bytes": 246594
+      }
+    ],
+    "committed": false,
+    "exclusion": "The screenshot contains source-like text from a separate local project; image bytes were kept out of the Strata repository."
+  },
+  "profile_matrix": [
+    {
+      "mode": "off",
+      "vision": "cpu",
+      "engine_gpu": 1,
+      "vision_gpu": false,
+      "max_tokens": 1024,
+      "uncensored": false,
+      "reserve_mib": "1280"
+    },
+    {
+      "mode": "off",
+      "vision": "gpu",
+      "engine_gpu": 1,
+      "vision_gpu": true,
+      "max_tokens": 1024,
+      "uncensored": false,
+      "reserve_mib": "1280"
+    },
+    {
+      "mode": "on",
+      "vision": "cpu",
+      "engine_gpu": 1,
+      "vision_gpu": false,
+      "max_tokens": 1024,
+      "uncensored": true,
+      "reserve_mib": "1280"
+    },
+    {
+      "mode": "on",
+      "vision": "gpu",
+      "engine_gpu": 1,
+      "vision_gpu": true,
+      "max_tokens": 1024,
+      "uncensored": true,
+      "reserve_mib": "1280"
+    }
+  ],
+  "method": {
+    "workload": "synthetic C# repository review prompt with an attached IDE screenshot",
+    "prompt_tokens_per_measured_call": 20598,
+    "completion_cap_tokens": 192,
+    "warmups_per_condition": 1,
+    "measured_calls_per_condition": 3,
+    "cached_prompt_tokens_per_measured_call": 0,
+    "all_measured_http_statuses": [
+      200,
+      200,
+      200,
+      200,
+      200,
+      200,
+      200,
+      200,
+      200,
+      200,
+      200,
+      200
+    ],
+    "timing_fields": "Strata API timings.prompt_per_second and timings.predicted_per_second; wall_ms is client-observed request time.",
+    "encoder_timing_limit": "The server does not expose isolated encoder time. wall_ms minus prompt_ms minus predicted_ms includes image encoding and other request/server/network overhead."
+  },
+  "result_files": [
+    "off-cpu.json",
+    "off-gpu.json",
+    "on-cpu.json",
+    "on-gpu.json",
+    "verification.txt"
+  ],
+  "reproduction_limit": "The benchmark script is included. The four image files are not included; see image.exclusion. The same screenshot variants are identified by SHA-256.",
+  "scope": {
+    "production_bats_changed": "status text only; profiles continue to default vision.gpu=false",
+    "opencode_config_changed": false,
+    "model_or_pack_changed": false,
+    "gpu_power_settings_changed": false,
+    "repository_benchmark_run": "CPU vision is the production default; GPU vision was tested with scratch profiles only."
+  },
+  "local_setup_checks": {
+    "unit_tests": "PASS 12/12",
+    "python_syntax": "PASS py_compile for setup helper and its tests",
+    "linux_tests": "NOT_RUN (GPU comparison performed on Windows only)",
+    "hosted_ci": "NOT_RUN"
+  }
+}
