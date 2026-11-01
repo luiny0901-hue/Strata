@@ -92,6 +92,7 @@ class ProfessionalGuidanceTests(unittest.TestCase):
             self.assertIn(term, reminder)
         self.assertIn(reminder, _codex_guide())
         guide = policy.guidance()
+        self.assertIn('외국어 동사·문구나 한자·비영어 문자 조각을 끼워 넣지 않는다', guide)
         self.assertIn('질문의 제목·선택지 설명', guide)
         self.assertIn('인코딩을 명시한 읽기', guide)
         self.assertIn('언어 교정만을 위한 모델 재호출이나 도구 실행 재시도는 하지 않는다', guide)
