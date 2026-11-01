@@ -7,6 +7,7 @@ this for you with [AI_SETUP.md](AI_SETUP.md).
 > **On this page:** [What you need](#what-you-need) · [Windows](#windows) · [Linux](#linux) ·
 > [AMD cards](#amd-cards) · [Several cards](#two-or-three-cards) · [Docker](#docker-linux) ·
 > [Older CPUs](#older-cpus-experimental) · [Updating](#updating) · [Where things are stored](#where-things-are-stored) ·
+> [Removing or moving](#removing-strata-or-moving-to-another-pc) ·
 > [Setup's questions](#setups-questions) · [Tuning](#tuning-for-your-pc) · [All options](#options-without-questions)
 
 ## What you need
@@ -208,6 +209,22 @@ says so and starts the engine you had.
 - **Where github.com cannot be reached:** a build from source downloads llama.cpp's source (ggml, gguf-py) from
   GitHub at the commit `LLAMA_CPP_COMMIT` in `setup.py` names. Put that commit's tree in `third_party/llama.cpp`
   yourself (from a mirror or another PC) and setup uses it instead (#585).
+
+## Removing Strata, or moving to another PC
+
+**To remove it** (the PC you borrowed, say): delete the Strata folder and the `Strata-data` folder next to it (or
+wherever `--data-dir` put them), and the small folder that remembers where the data is - `%APPDATA%\Strata` on
+Windows, `~/.config/strata` on Linux. Your chats live in your browser (above): take them there first if you want
+to keep them. Nothing else stays on the PC, except what setup installs when the PC lacks it - Python (for your
+user account on Windows, through the package manager on Linux) and, where the engine had to be compiled, the
+build tools it asked you about.
+
+**To move to another PC or drive:** copy the two folders together and run `START-HERE.bat` (Linux: `./setup.sh`)
+there. It finds the model files where they are, so the ~70 GB of models are not downloaded again; everything
+small it makes fresh for that PC - its own Python environment (a copied one cannot start on another PC, so setup
+makes a new one and says so), and the engine again when the new card needs other code (it says what it does).
+Model files that stayed on another drive are used where they are: point setup at them once with `--data-dir`,
+and it remembers.
 
 ## Setup's questions
 
