@@ -37,6 +37,8 @@ Desktop의 `ccd_*`·Claude Browser·terminal·scheduled-tasks는 앱이 제공�
 
 요청 범위와 완료 조건을 확인하고 해당 소유자·실제 버전·현재 파일을 확인한다. 원본을 보존한 최소 변경을 준비하고 관련 검사만 수행한다. 변경을 저장한 사실, 새 프로세스에 반영된 사실, 실제 동작·성능 검증을 구분해 보고한다. MCP stdio 도구는 실행 시 소스 코드를 로드하므로 이미 연결된 세션은 소스 변경을 자동으로 다시 읽지 않는다. 도구 구현을 바꿨다면 MCP를 다시 연결하거나 새 Code 세션에서 도구 목록·버전을 확인한다. 이를 위해 Desktop·OpenCodex·Strata를 불필요하게 재시작하지 않는다. 한 번에 여러 설정을 무근거로 바꿔 최적화라고 부르지 않는다.
 
+이 저장소의 커밋은 현재 worktree 브랜치에 저장하고 push는 `personal`(luiny0901-hue/Strata)로 고정한다. 저장소 설정(`remote.pushDefault`·`push.autoSetupRemote`, 2026-11-01 적용)으로 URL 없는 push는 포크로 가고 upstream이 없는 새 브랜치도 같은 포크에 추적이 생성된다. `origin`은 상류(Niko1221/Strata) 가져오기 전용이고, 다른 대상에 대한 push는 사용자가 명시할 때만 수행한다.
+
 Strata 재시작이 필요한 경우 파일을 먼저 저장하고 작업 범위·완료/미완료·변경 경로·남은 검증을 checkpoint로 작성한다. MCP `restart_strata`에 고유한 operation_id와 같은 checkpoint를 전달하고 실제 ready 결과를 기다린다. 재시작은 기존 supervisor가 idle을 확인한 뒤 수행한다. 전달이 불확실하면 같은 ID로 `restart_status`를 조회한다. 다른 ID로 중복 재시작하지 않는다. 실패·취소는 완료가 아니며 실제 상태를 확인하고 남은 작업만 처리한다. 정지·취소 요청 뒤 늦은 완료 알림이 새 작업 권한이 되지 않는다.
 
 자율 최적화 루프는 대상별로 적용·재적용 경로를 정해 둔다(전부 2026-10-27 실측). Strata: 수정 → 관련 테스트 → 커밋 → 운영 루트 백업 후 배포 → 반영(`restart_strata` 또는 supervisor 재시작) → 재검증·동일 조건 측정 → 개선이면 유지, 아니면 백업 복원. OpenCodex: `opencodex_service_status`가 등록 소유자의 정확한 재시작 명령과 PID·served_at을 반환하므로, 변경 전후 PID를 대조해 반영을 확인하고 같은 프록시 경로의 준비 상태를 확인한다(서비스는 작업 스케줄러 소유로 Desktop과 독립). Desktop: 체크포인트 인계(`restart_desktop`) — 조용한 첫 순간 종료 → 네이티브 재개가 체크포인트로 미완료 이어간 뒤 자동 재열기. 판정 기준은 AGENTS.md를 따른다: 기본값·성능 변경은 같은 조건의 기준선과 변경 후 실측 수치가 있을 때만 채택하고, 근거가 없으면 보류하거나 되돌린다.
