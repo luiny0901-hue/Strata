@@ -71,6 +71,109 @@ class ProfessionalGuidanceTests(unittest.TestCase):
         self.assertNotIn('mcp__ccd_turn__wrap_up', _codex_guide())
         self.assertNotIn('mcp__ccd_turn__update_plan', _codex_guide())
 
+    def test_progress_stays_korean_after_handling_english_material(self):
+        from tools.strata_client_settings import _codex_guide
+        reminder = policy.language_reminder()
+        self.assertIn('영어 문서·로그·검색 결과를 읽거나 처리한 직후에도', reminder)
+        self.assertIn('새 진행·백그라운드 대기 안내까지 모든 사용자 표시 문장은 한국어로 시작하고', reminder)
+        self.assertIn('다음 문장부터 바로 한국어로 돌아온다', reminder)
+        self.assertIn(reminder, _codex_guide())
+        guide = policy.guidance()
+        self.assertIn('진행 문장이 영어로 빠지면 중단하지 말고', guide)
+
+    def test_korean_policy_covers_tool_labels_and_choices_without_changing_code(self):
+        from tools.strata_client_settings import _codex_guide
+        reminder = policy.language_reminder()
+        for term in ['description', '진행 제목', '체크리스트', '질문 선택지',
+                     '후속 버튼 label/message', '명령·경로·JSON 키·코드·원문은 변경하지 않는다',
+                     '깨진 도구 결과는 추측해 인용하지 않는다',
+                     '대화 보고는 자연스러운 존댓말', '준비·예정·미실행·실패·검증 통과를 구분',
+                     '표현 예시는 성공 근거가 아니다', '결정할 일이 없으면 선택지를 만들지 않는다']:
+            self.assertIn(term, reminder)
+        self.assertIn(reminder, _codex_guide())
+        guide = policy.guidance()
+        self.assertIn('질문의 제목·선택지 설명', guide)
+        self.assertIn('인코딩을 명시한 읽기', guide)
+        self.assertIn('언어 교정만을 위한 모델 재호출이나 도구 실행 재시도는 하지 않는다', guide)
+
+    def test_conversation_and_fiction_keep_distinct_registers(self):
+        from tools.strata_client_settings import _codex_guide
+        reminder = policy.language_reminder()
+        for phrase in ['일상 대화에는 업무 보고체를 붙이지 않고',
+                       '성과·경험·감정을 단정하지 않는다',
+                       '보고용 존댓말을 강제하지 않는다',
+                       '설정·사건·분량·의도된 문체는 보존한다']:
+            self.assertIn(phrase, reminder)
+        self.assertIn(reminder, _codex_guide())
+        guide = policy.guidance()
+        self.assertIn('같은 뜻의 강조·동작·감정 설명을 불필요하게 반복하지 않는다', guide)
+        self.assertIn('자연스러움을 이유로 줄거리나 인물 성격을 바꾸지 않는다', guide)
+        self.assertIn('대명사는 장면 전체에서 하나로 일치시킨다', guide)
+        self.assertIn('대명사는 앞선 호칭·성별과 일치시킨다', reminder)
+
+    def test_fiction_length_and_scene_conditions_are_countable(self):
+        from tools.strata_client_settings import _codex_guide
+        reminder = policy.language_reminder()
+        self.assertIn('요청 분량은 문단·대사 수로 세어 맞추고', reminder)
+        self.assertIn('명시된 결말·소품 조건은 최종 문단에서 확인한다', reminder)
+        self.assertIn(reminder, _codex_guide())
+        guide = policy.guidance()
+        self.assertIn('문단·대사 수 같은 셀 수 있는 단위로 완성 원고를 세어 맞추고', guide)
+        self.assertIn('결말·소품처럼 명시된 장면 조건은 최종 문단에서 직접 확인한다', guide)
+
+    def test_scene_person_length_plan_and_multi_request_replies(self):
+        from tools.strata_client_settings import _codex_guide
+        reminder = policy.language_reminder()
+        self.assertIn('아직 일어나지 않은 미래 결과를 ‘분명’하다고도 말하지 않는다', reminder)
+        self.assertIn('여러 요청이 함께 주어지면 하나도 빼지 않고 지정한 문장 수에 맞춘다', reminder)
+        self.assertIn('요청한 시점·시제·서술 인칭·인물 말투를 유지하며', reminder)
+        self.assertIn('하한을 채울 문단 수를 먼저 정하고 요청 분량은 문단·대사 수로 세어 맞추고', reminder)
+        self.assertIn('짧은 장면 하나로 줄이지 않으며', reminder)
+        self.assertIn('말투 지시는 서술에 ‘존댓말’·‘반말’이라는 이름으로 옮기지 않고 실제 대화로 보여준다', reminder)
+        self.assertIn(reminder, _codex_guide())
+        guide = policy.guidance()
+        self.assertIn('아직 일어나지 않은 미래의 결과·감정을 ‘분명’하다고 확정하지도 않는다', guide)
+        self.assertIn('여러 요청이 함께 주어지면 하나도 빼지 않고 지정한 문장 수 안에 모두 담는다', guide)
+        self.assertIn('서술 인칭이 첫 문장부터 끝까지 어긋나지 않으며', guide)
+        self.assertIn('하한을 채울 문단 수를 먼저 정해 둔다', guide)
+        self.assertIn('글자 수 범위로 요청받은 단편은 본문 문단을 서너 개 이상으로 펼쳐 쓴다', guide)
+        self.assertIn("말투 지시는 서술에 ‘존댓말’·‘반말’이라는 이름으로 옮기지 않고 실제 대화로 보여준다", guide)
+
+    def test_extended_conversation_preserves_terms_and_user_canon(self):
+        from tools.strata_client_settings import _codex_guide
+        reminder = policy.language_reminder()
+        for phrase in ['최신 정정값·주체·단위와 사례를 구분', '비유로 기술적 의미·한계를 바꾸거나',
+                       '앞선 생성 오류보다 사용자 지정 관계·호칭·말투·시점·종료 조건을 우선',
+                       '직전 장면 끝의 소유물·위치·지식과 다음 시작을 대조']:
+            self.assertIn(phrase, reminder)
+        self.assertIn(reminder, _codex_guide())
+        self.assertIn('이미 설명한 전문용어를 매번 다시 풀지 않는다', policy.guidance())
+
+    def test_translation_preserves_roles_and_distinguishes_interpretation(self):
+        from tools.strata_client_settings import _codex_guide
+        reminder = policy.language_reminder()
+        for phrase in ['번역은 행위자·대상·수식 관계·호칭·부정·조건·수치·단위를 보존',
+                       '의도나 금지 방향을 뒤집지 않는다', '해설의 사실과 가능한 해석을 나눠',
+                       '번역문만 요청하면 해설을 붙이지 않는다']:
+            self.assertIn(phrase, reminder)
+        self.assertIn(reminder, _codex_guide())
+        guide = policy.guidance()
+        self.assertIn('백분율과 퍼센트포인트', guide)
+        self.assertIn('대명사의 지시 대상이 모호하면 모호함을 보존', guide)
+
+    def test_foreign_names_keep_requested_spelling_and_scene_roles(self):
+        from tools.strata_client_settings import _codex_guide
+        reminder = policy.language_reminder()
+        self.assertIn('외국 회사·제품명은 통용 표기나 지정된 원어를 유지', reminder)
+        self.assertIn('입력에 적힌 원어 표기나 `친구 A` 같은 축약은 유지 지시가 아니라면 답에 옮기지 않고', reminder)
+        self.assertIn('그 표기를 본문 전체에서 일관되게 쓴다', reminder)
+        self.assertIn('무관한 인과를 붙이지 않는다', reminder)
+        self.assertIn('작성 지시를 소설 본문에 그대로 복사하지 않고', reminder)
+        self.assertIn(reminder, _codex_guide())
+        guide = policy.guidance()
+        self.assertIn('조사는 실제 읽는 소리에 맞추고', guide)
+        self.assertIn('원어 표기를 유지하라는 요청은 한글 음역으로 바꾸지 않는다', guide)
+
     def test_performance_decisions_reach_both_clients_from_shared_source(self):
         from tools.strata_client_settings import _codex_guide
         scope = policy.scope_policy()
