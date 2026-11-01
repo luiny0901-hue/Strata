@@ -22,6 +22,10 @@ REA_PACKAGE = 'rea-agents@6.7.0'
 CUA_VERSION = '0.36.0'
 CUA_PS = 'https://cua.ai/driver/install.ps1'
 CUA_SH = 'https://cua.ai/driver/install.sh'
+MINIMAL_KEYS_BEGIN = '# BEGIN strata-minimal-keys:v1'
+MINIMAL_KEYS_END = '# END strata-minimal-keys:v1'
+MINIMAL_TABLE_BEGIN = '# BEGIN strata-minimal-provider:v1'
+MINIMAL_TABLE_END = '# END strata-minimal-provider:v1'
 
 
 class Pending(RuntimeError):
@@ -44,9 +48,9 @@ def refresh_path():
     os.environ['PATH'] = os.pathsep.join([*paths, os.environ.get('PATH', '')])
 
 
-def run(args, *, capture=False, timeout=1800, env=None):
-    # No shell; credentials are never command-line arguments.
-    result = subprocess.run([str(a) for a in args], check=True, text=True,
+def run(args, *, capture=False, timeout=1800, env=None, input=None):
+    # No shell; credentials are never command-line arguments (stdin carries them when input= is used).
+    result = subprocess.run([str(a) for a in args], check=True, text=True, input=input,
                             stdout=subprocess.PIPE if capture else None, timeout=timeout, env=env)
     return result.stdout if capture else result
 
@@ -365,7 +369,143 @@ class Installer:
         if not result.get('ready') or not result.get('desktop_ready'):
             raise Pending('설치됐지만 연결 진단이 완료되지 않았습니다. 기존 doctor로 남은 항목을 확인하세요.')
 
-    def client(self, connection=None, ssh_host=None):
+    def strata_origin(self, connection=None, ssh_host=None):
+        """The direct Strata server address, no proxy: entered for LAN/Tailscale, loopback for SSH tunnels."""
+        connection = connection or self.state.get('minimal_connection')
+        if not connection:
+            print('1: 같은 네트워크·Tailscale 주소  2: 외부 서버(SSH)  3: 이미 열린 SSH 터널')
+            connection = {'1': 'direct', '2': 'ssh', '3': 'forwarded'}.get(input('연결 방식 [1]: ').strip() or '1')
+        if connection not in ('direct', 'ssh', 'forwarded'):
+            raise Pending('연결 방식을 다시 선택하세요.')
+        self.state['minimal_connection'] = connection
+        origin = self.state.get('server_origin')
+        if connection == 'direct':
+            if not origin:
+                origin = input('Strata 서버 주소 (예: http://100.103.226.107:8080): ').strip().rstrip('/')
+            if not re.fullmatch(r'https?://[A-Za-z0-9._-]+(:\d{1,5})?', origin):
+                raise Pending('서버 주소는 http://주소:포트 (또는 https) 형식으로 입력하세요.')
+        elif connection == 'ssh':
+            ssh_host = ssh_host or self.state.get('ssh_host') or input('서버 SSH 주소 (사용자@서버): ').strip()
+            validate_ssh_host(ssh_host)
+            self.state['ssh_host'] = ssh_host
+            origin = 'http://127.0.0.1:18080'
+            if not endpoint_exists(origin):
+                self.ensure_ssh_client()
+                launch_tunnel(ssh_host, self.platform)
+                input('열린 SSH 창에서 로그인한 뒤 Enter를 누르세요. 창은 유지합니다. ')
+        else:
+            origin = 'http://127.0.0.1:18080'
+        self.state['server_origin'] = origin
+        self.save()
+        return origin
+
+    def connect_direct(self, connection=None, ssh_host=None):
+        """Probe health and the key for the direct Codex path; the key only lives in STRATA_API_KEY, never in files we write."""
+        origin = self.strata_origin(connection, ssh_host)
+        key = os.environ.get('STRATA_API_KEY', '').strip()
+        if not key and origin.startswith('http://127.0.0.1'):
+            key_file = self.home/'.config/strata/STRATA_API_KEY'
+            if key_file.is_file():
+                key = key_file.read_text(encoding='utf-8').strip()
+        if not key:
+            key = getpass.getpass('Strata 서버 API 키 (키가 없으면 Enter, 화면에 표시되지 않음): ')
+        headers = {'Authorization': 'Bearer '+key} if key else {}
+        try:
+            health = get_json(origin+'/health', headers)
+        except (OSError, ValueError):
+            raise Pending('Strata 접속 실패입니다. 서버 주소·터널·API 키를 확인한 뒤 재실행하세요.') from None
+        model, context = health.get('model'), health.get('max_context')
+        if health.get('status') != 'ok' or health.get('loaded') is not True or not isinstance(model, str) or not model:
+            raise Pending('서버 모델이 준비되지 않았습니다. 다른 모델로 대체하지 않습니다.')
+        if type(context) is not int or context < 262144:
+            raise Pending('서버의 262,144 컨텍스트 준비를 먼저 마치세요.')
+        self.model = model
+        self.state['context'] = min(context, 262144)
+        if key:
+            self.set_api_key(key)
+        self.save()
+
+    def set_api_key(self, key):
+        """Keep the key where Codex reads it (the STRATA_API_KEY environment); a re-login or new terminal applies it."""
+        os.environ['STRATA_API_KEY'] = key
+        if self.platform == 'win32':
+            script = "$k=[Console]::In.ReadToEnd().Trim(); [Environment]::SetEnvironmentVariable('STRATA_API_KEY',$k,'User'); $k=$null"
+            run(['powershell.exe', '-NoProfile', '-Command', script], input=key, timeout=60)
+        elif self.platform == 'darwin':
+            run(['launchctl', 'setenv', 'STRATA_API_KEY', key], timeout=30)  # until the next login; rerun the installer to renew
+        print('STRATA_API_KEY를 설정했습니다. 이미 열려 있던 터미널은 새로 여셔야 반영됩니다.')
+
+    def write_codex_minimal(self):
+        """Manage the official direct Codex block (docs/DETAILS.md) in two marked line regions; everything else stays."""
+        path = self.home/'.codex/config.toml'
+        origin, context = self.state['server_origin'], self.state.get('context', 262144)
+        keys = ['model = "strata"\n', 'model_provider = "strata"\n', f'model_context_window = {context}\n',
+                'show_raw_agent_reasoning = true\n']
+        table = ['[model_providers.strata]\n', 'name = "Strata (local)"\n', f'base_url = "{origin}/v1"\n',
+                 'wire_api = "responses"\n', 'stream_idle_timeout_ms = 600000\n', 'env_key = "STRATA_API_KEY"\n']
+        existing = path.read_text(encoding='utf-8') if path.is_file() else ''
+        lines = existing.splitlines(keepends=True)
+
+        def find(begin, end, after=0):
+            start = next((i for i, line in enumerate(lines[after:], after) if line.rstrip('\n') == begin), None)
+            stop = next((i for i, line in enumerate(lines[start+1:], start+1) if line.rstrip('\n') == end), None) \
+                if start is not None else None
+            return start, stop
+
+        stripped_lines = list(lines)  # region bodies removed, markers kept (they never match the conflict probes)
+        for begin, end in ((MINIMAL_KEYS_BEGIN, MINIMAL_KEYS_END), (MINIMAL_TABLE_BEGIN, MINIMAL_TABLE_END)):
+            start = next((i for i, line in enumerate(stripped_lines) if line.rstrip('\n') == begin), None)
+            stop = next((i for i, line in enumerate(stripped_lines[start+1:], start+1) if line.rstrip('\n') == end), None) \
+                if start is not None else None
+            if start is not None and stop is not None:
+                stripped_lines = stripped_lines[:start+1] + stripped_lines[stop:]
+        stripped = ''.join(stripped_lines)
+        if re.search(r'(?m)^\s*(model|model_provider|model_context_window)\s*=', stripped) or '[model_providers.strata]' in stripped:
+            raise Pending(f'Codex 설정({path})에 관리 영역 밖의 모델 키나 공급자 "strata"가 이미 있습니다. 기존 값은 덮지 않으므로'
+                          ' 그 값들을 지운 뒤 다시 실행하세요. (지침 파일과 다른 공급자는 그대로입니다.)')
+
+        def upsert(begin, end, body, place):
+            nonlocal lines
+            start, stop = find(begin, end)
+            if start is not None and stop is not None:
+                lines = lines[:start+1] + body + lines[stop:]
+            elif place == 'head':
+                lines = [begin+'\n', *body, end+'\n'] + (['\n'] if lines else []) + lines
+            else:
+                lines = lines + (['\n'] if lines and lines[-1].strip() else []) + [begin+'\n', *body, end+'\n']
+        upsert(MINIMAL_KEYS_BEGIN, MINIMAL_KEYS_END, keys, 'head')
+        upsert(MINIMAL_TABLE_BEGIN, MINIMAL_TABLE_END, table, 'tail')
+        updated = ''.join(lines)
+        if updated == existing:
+            print('기존 Codex 직결 설정을 그대로 재사용합니다.')
+            return
+        if existing.strip():
+            backup = path.parent/'backups'/('integrated-minimal-'+time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()))/path.name
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(path, backup)
+            self.state['codex_config_backup'] = str(backup)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(updated, encoding='utf-8')
+        self.state['codex_direct'] = origin+'/v1'
+
+    def codex_minimal_guide(self):
+        from tools.strata_client_settings import sync_codex
+        sync_codex(self.home)
+
+    def client_minimal(self, connection=None, ssh_host=None):
+        """A coding client without Node, OpenCodex or Desktop: Codex talks to Strata's Responses API directly."""
+        connection = 'direct' if connection == 'local' else connection
+        self.step('Strata 서버 연결(직결)', lambda: self.connect_direct(connection, ssh_host))
+        self.step('Codex 설정(직결)', self.write_codex_minimal)
+        self.step('Codex 지침', self.codex_minimal_guide)
+        self.state['status'] = 'configured'
+        self.save()
+        print('\n경량 연결 설정 완료. Codex CLI·ChatGPT Desktop(Codex 모드)의 새 세션과 새 터미널에서 사용하세요.')
+        print('Node·OpenCodex·Claude Desktop·CUA는 설치하지 않았습니다. 전 기능이 필요하면 같은 설치기에서 전체 설치를 선택하세요.')
+
+    def client(self, connection=None, ssh_host=None, mode='full'):
+        if mode == 'minimal':
+            return self.client_minimal(connection, ssh_host)
         self.client_dependencies()
         self.step('OpenCodex 서비스', self.proxy)
         self.step('Strata 서버 연결', lambda: self.connect(connection, ssh_host))
@@ -428,6 +568,7 @@ def launch_tunnel(host, platform):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--role', choices=['client', 'server'])
+    parser.add_argument('--mode', choices=['full', 'minimal'], help='접속 PC: full은 전체 바이브 환경, minimal은 Codex 직결(설치 없음)')
     parser.add_argument('--plan', action='store_true', help='설치·파일 변경 없이 준비 단계 표시')
     parser.add_argument('--connection', choices=['local', 'ssh', 'forwarded'])
     parser.add_argument('--ssh-host')
@@ -440,15 +581,26 @@ def main(argv=None):
             print('1 또는 2를 선택하세요.', file=sys.stderr)
             return 2
         role = 'client' if choice == '1' else 'server'
+    mode = args.mode
+    if role == 'client' and not mode and not args.plan and sys.stdin.isatty():
+        print('1: 전체 바이브 환경(권장)  2: 경량 연결(Codex만, Node·OpenCodex 설치 없음)')
+        choice = input('접속 방식 [1]: ').strip() or '1'
+        if choice not in ('1', '2'):
+            print('1 또는 2를 선택하세요.', file=sys.stderr)
+            return 2
+        mode = 'full' if choice == '1' else 'minimal'
+    mode = mode or 'full'
     supported = (sys.platform in ('win32', 'darwin') if role == 'client' else sys.platform in ('win32', 'linux'))
     if not supported:
         print('이 NVFP4 서버는 Windows/Linux, 접속 PC 통합 설치는 Windows/Mac을 사용하세요.', file=sys.stderr)
         return 2
     if args.plan:
-        print(json.dumps({'platform': sys.platform, 'role': role, 'changes': False,
-              'steps': ['Python', 'Node.js', 'Claude Desktop', 'CUA Driver', 'OpenCodex', 'REA',
-                        '서버 연결', '기존 Claude 설정기'] if role == 'client' else
-                       ['Python 가상환경', '서버 의존성', 'Visual C++ 실행 환경(Windows)', 'NVIDIA 드라이버 확인·GPU 선택', '동일 포크·모델·Pack 복구 확인', '기존 프로필 준비']}, ensure_ascii=False, indent=2))
+        steps = (['서버 주소·API 키 확인', 'Codex 설정(직결)', 'Codex 지침'] if role == 'client' and mode == 'minimal' else
+                 ['Python', 'Node.js', 'Claude Desktop', 'CUA Driver', 'OpenCodex', 'REA', '서버 연결', '기존 Claude 설정기']
+                 if role == 'client' else
+                 ['Python 가상환경', '서버 의존성', 'Visual C++ 실행 환경(Windows)', 'NVIDIA 드라이버 확인·GPU 선택', '동일 포크·모델·Pack 복구 확인', '기존 프로필 준비'])
+        print(json.dumps({'platform': sys.platform, 'role': role, 'mode': mode if role == 'client' else None,
+                          'changes': False, 'steps': steps}, ensure_ascii=False, indent=2))
         return 0
     refresh_path()
     if args.ssh_host:
@@ -460,7 +612,7 @@ def main(argv=None):
             if role == 'client':
                 if sys.platform not in ('win32', 'darwin'):
                     raise Pending('접속 PC 통합 설치는 Windows·macOS를 지원합니다. Linux는 --role server를 사용하세요.')
-                installer.client(args.connection, args.ssh_host)
+                installer.client(args.connection, args.ssh_host, mode)
             else:
                 prepare_server(installer)
         return 0

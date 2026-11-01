@@ -2,6 +2,7 @@
 import contextlib
 from io import StringIO
 import json
+import os
 from pathlib import Path
 import tempfile
 import subprocess
@@ -191,6 +192,88 @@ class IntegratedInstallerTests(unittest.TestCase):
              contextlib.redirect_stdout(StringIO()):
             with self.assertRaisesRegex(install.Pending, '동일 포크'):
                 install.prepare_server(installer)
+        self.assertEqual(installer.state['status'], 'waiting')
+
+
+class MinimalModeTests(unittest.TestCase):
+    """Codex-direct mode: no Node, no OpenCodex, personal Codex settings preserved, key never written to files."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix='strata-minimal-test-')
+        self.addCleanup(self.temporary.cleanup)
+        self.home = Path(self.temporary.name)
+        self.secret = 'fixture-direct-key-not-for-files'
+        self.health = {'status': 'ok', 'loaded': True, 'model': 'fixture-model', 'max_context': 262144}
+
+    def probes(self, health=None):
+        stack = contextlib.ExitStack()
+        self.addCleanup(stack.close)
+        stack.enter_context(patch.dict(os.environ, {}, clear=True))
+        stack.enter_context(patch.object(install, 'run'))
+        stack.enter_context(patch.object(install, 'get_json', return_value=health or self.health))
+        stack.enter_context(patch.object(install.getpass, 'getpass', return_value=self.secret))
+        stack.enter_context(patch('builtins.input', side_effect=['1', 'http://100.1.2.3:8080']))
+        stack.enter_context(patch.object(install.time, 'gmtime', return_value=(2026, 11, 1, 0, 0, 0, 0, 1, 0)))
+        from tools import strata_client_settings as clients
+        stack.enter_context(patch.object(clients, 'sync_codex'))
+        return stack
+
+    def test_minimal_plan_shows_only_the_three_direct_steps(self):
+        with patch.object(install, 'run', side_effect=AssertionError('No subprocess')), \
+             patch.object(install, 'refresh_path', side_effect=AssertionError('No PATH mutation')), \
+             patch.object(Path, 'home', side_effect=AssertionError('No user state')), \
+             contextlib.redirect_stdout(StringIO()) as output:
+            self.assertEqual(install.main(['--role', 'client', '--mode', 'minimal', '--plan']), 0)
+        plan = json.loads(output.getvalue())
+        self.assertFalse(plan['changes'])
+        self.assertEqual(plan['mode'], 'minimal')
+        self.assertEqual(plan['steps'], ['서버 주소·API 키 확인', 'Codex 설정(직결)', 'Codex 지침'])
+
+    def test_minimal_writes_codex_regions_and_reapplies_with_zero_changes(self):
+        self.probes()
+        installer = install.Installer(self.home, 'client', 'win32')
+        with contextlib.redirect_stdout(StringIO()):
+            installer.client_minimal()
+        config = self.home/'.codex/config.toml'
+        written = config.read_text(encoding='utf-8')
+        self.assertIn('wire_api = "responses"', written)
+        self.assertIn('base_url = "http://100.1.2.3:8080/v1"', written)
+        self.assertIn('model_context_window = 262144', written)
+        self.assertLess(written.index(install.MINIMAL_KEYS_BEGIN), written.index('[model_providers.strata]'))
+        self.assertNotIn(self.secret, written)
+        self.assertNotIn(self.secret, installer.path.read_text(encoding='utf-8'))
+        self.assertEqual(installer.state['status'], 'configured')
+        self.assertFalse((self.home/'.codex/backups').exists())
+        resumed = install.Installer(self.home, 'client', 'win32')
+        with contextlib.redirect_stdout(StringIO()):
+            resumed.client_minimal()
+        self.assertEqual(config.read_text(encoding='utf-8'), written)
+        self.assertFalse((self.home/'.codex/backups').exists())
+
+    def test_existing_model_keys_or_provider_stop_without_touching_the_file(self):
+        for foreign in ('model = "other"\n', '[model_providers.strata]\nname = "yours"\n'):
+            with self.subTest(config=foreign.strip()):
+                self.probes()
+                temp = tempfile.TemporaryDirectory(prefix='strata-minimal-home-')
+                self.addCleanup(temp.cleanup)
+                home = Path(temp.name)
+                config = home/'.codex/config.toml'
+                config.parent.mkdir()
+                config.write_text(foreign, encoding='utf-8')
+                installer = install.Installer(home, 'client', 'win32')
+                with contextlib.redirect_stdout(StringIO()):
+                    with self.assertRaises(install.Pending):
+                        installer.client_minimal()
+                self.assertEqual(config.read_text(encoding='utf-8'), foreign)
+                self.assertEqual(installer.state['status'], 'waiting')
+
+    def test_unready_server_never_writes_the_codex_config(self):
+        self.probes(health={'status': 'ok', 'loaded': False})
+        installer = install.Installer(self.home, 'client', 'win32')
+        with contextlib.redirect_stdout(StringIO()):
+            with self.assertRaises(install.Pending):
+                installer.client_minimal()
+        self.assertFalse((self.home/'.codex/config.toml').exists())
         self.assertEqual(installer.state['status'], 'waiting')
 
 

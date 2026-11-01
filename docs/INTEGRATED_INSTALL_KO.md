@@ -12,6 +12,18 @@
 
 실행 전에 계획만 보려면 Windows는 `INSTALL-STRATA-AGENT.bat --role client --plan`, Mac은 `bash install-strata-agent.sh --role client --plan`, Linux는 `bash install-strata-agent.sh --role server --plan`을 사용합니다. 계획 모드는 프로그램 설치·연결 설정·서비스 변경을 하지 않습니다. Python이 없는 경우에도 부트스트랩은 설치 계획만 표시하고 종료합니다.
 
+접속 PC는 역할 선택 다음에 접속 방식을 고릅니다(`--mode full|minimal`로도 지정 가능). `전체 바이브 환경`은 아래 표의 준비를 모두 하고, `경량 연결`은 Codex 직결 설정만 만들며 아무 앱도 설치하지 않습니다.
+
+## 경량 연결(Codex 직결, `--mode minimal`)
+
+모델이 이미 서버에 있는 접속 PC용 최소 경로입니다. Node.js·OpenCodex·Claude Desktop·CUA·REA를 설치하지 않고, 다음 세 단계만 수행합니다.
+
+1. 서버 주소와 API 키를 물어 health 응답(모델 로드·262K 이상)을 확인합니다. 연결은 `같은 네트워크·Tailscale 주소 입력`, `외부 서버(SSH)`, `이미 열린 SSH 터널` 중 택1입니다. 키는 Codex가 읽는 `STRATA_API_KEY` 환경에만 저장되고(Windows 사용자 환경, Mac은 로그인까지의 `launchctl`) 설치 기록·설정 파일·프로세스 인자에 남지 않습니다.
+2. `~/.codex/config.toml`에 공식 직결 설정(DETAILS의 Responses API 문단과 동일: `model_provider = "strata"`, `wire_api = "responses"`, `env_key = "STRATA_API_KEY"`)을 표시된 두 영역으로 관리해 씁니다. 파일이 이미 있고 첫 변경이면 백업을 남깁니다. 영역 밖에 사용자 모델 키나 다른 `[model_providers.strata]`가 있으면 덮지 않고 중단합니다. 재실행 시 변경 0개입니다.
+3. Codex 지침은 기존 `AGENTS.md` 동기화 소유자(`sync_codex`)를 그대로 사용합니다.
+
+완성된 후에는 Codex CLI와 ChatGPT Desktop(Codex 모드)의 **새 터미널·새 세션**에서 동작합니다. 이 mode는 Codex 계열만 다루므로 Claude 앱·OpenCodex·전체 감사가 필요하면 같은 설치기의 전체 설치를 선택합니다. 서버는 직결 노출 규칙(키 필수)을 따릅니다.
+
 ## 접속 PC에 포함된 설치
 
 | 항목 | 처리 |
@@ -73,6 +85,11 @@ Windows 접속 PC에 OpenSSH 클라이언트가 없으면 해당 선택적 기�
 
 
 배포 보완: 기존 Windows 실행기의 이미지 설정 보존 검사 1개도 통과했다(관련 검사 합계 28개). 외부 PC로 옮길 설치 전용 ZIP을 준비했으며 개인 설정·API 키·모델·Pack·엔진·가상환경은 포함하지 않는다. 첫 ZIP 해제 검증은 샌드박스 임시 폴더의 PermissionError로 실패했다. 허용된 작업 폴더에서 다시 생성·해제하여 파일 해시, 공통 모듈 import, 설치 본문의 --plan 통과를 확인했다. ZIP의 POSIX 셸 실행 권한 메타데이터도 확인했다. Windows 한글 경로의 Python 탐색 인코딩을 UTF-8로 맞춘 뒤 BAT 계획 모드를 다시 확인했다.
+
+## 2026-11-01 검증 기록 (경량 연결)
+
+- `tools/test_install_strata_agent.py` 18개 통과: 기존 14개와 경량 신규 4개(계획 표시 3단계, Codex 영역 기록 뒤 재적용 변경 0개와 키 미기록, 관리 영역 밖 모델 키·공급자 보존 중단, 모델 미준비 시 설정 파일 미생성). 관련 지침·설정 검사 42개도 함께 통과했다. 두 mode의 `--plan` 실행은 출력 외 변경이 없었다.
+- 경량 연결의 실제 서버 접속, 실제 Codex·ChatGPT Desktop 동작, Mac 경로는 이번 검증에 포함하지 않았다. 첫 실사용은 검증되지 않은 경로다.
 
 ## 선택형 서버 자동 업데이트
 
