@@ -139,6 +139,18 @@ class ProfessionalGuidanceTests(unittest.TestCase):
         self.assertIn('글자 수 범위로 요청받은 단편은 본문 문단을 서너 개 이상으로 펼쳐 쓴다', guide)
         self.assertIn("말투 지시는 서술에 ‘존댓말’·‘반말’이라는 이름으로 옮기지 않고 실제 대화로 보여준다", guide)
 
+    def test_ui_strings_follow_screen_word_conventions(self):
+        from tools.strata_client_settings import _codex_guide
+        reminder = policy.language_reminder()
+        self.assertIn('같은 화면 단추·메뉴 이름을 ‘확인’·‘저장’ 같은 명사형으로 통일하고', reminder)
+        self.assertIn('오류 문구에 원인과 다음 행동을 담고', reminder)
+        self.assertIn(reminder, _codex_guide())
+        guide = policy.guidance()
+        self.assertIn('같은 화면의 단추·메뉴 이름은 한 가지 형태로 통일하고', guide)
+        self.assertIn('같은 기능의 말은 화면 전체에서 하나로 쓴다', guide)
+        self.assertIn('영문 말이나 이중 피동을 그대로 옮기지 않고 원인과 다음 행동', guide)
+        self.assertIn('“네, 제안합니다” 같은 도입·제안 문장을 붙이지 않는다', guide)
+
     def test_extended_conversation_preserves_terms_and_user_canon(self):
         from tools.strata_client_settings import _codex_guide
         reminder = policy.language_reminder()
