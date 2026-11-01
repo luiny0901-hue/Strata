@@ -107,3 +107,9 @@ Claude Desktop Code의 작업 체크리스트는 앱 내장 `mcp__ccd_turn__upda
 백업: `~/.claude/backups/strata-opencodex-20261101T062028047595Z`와 `~/.codex/backups/strata-opencodex-20261101T062028088463Z`. 재적용은 양쪽 모두 변경 0개, 저장 진단은 `configured=true`였다. `py -B -X utf8 -m unittest tools.test_claude_code_guidance tools.test_strata_client_settings -q`로 41개 검사를 통과했고 `git diff --check`도 통과했다. 생성 지침 전달·설정 보존 검사이며, 네 클라이언트의 새 실제 설계 작업이나 생성된 제품의 성능 비교는 이번에 실행하지 않았다. 지침 보강을 모든 작업의 최적화 보장으로 해석하지 않는다. 모델·추론 수준·서비스·권한은 변경하지 않았다.
 
 현재 체크아웃의 진단 산출물(버전 관리 제외): [Claude 최종 영수증](../.strata-mcp/autonomy-check-20261101/claude-standalone-summary.json), [Codex 최종 영수증](../.strata-mcp/autonomy-check-20261101/codex-summary.json), [Claude 독립 검사](../.strata-mcp/autonomy-check-20261101/claude-standalone-tests.log), [Codex 독립 검사](../.strata-mcp/autonomy-check-20261101/codex-tests.log). 단순 계산 수정의 도구 왕복·검증 증거이며, 새 ChatGPT Desktop 대화에서 같은 수정을 끝내는 시험·장시간 작업·1M 압축 경계·재부팅 복구·다른 OS는 이번에 실행하지 않았다. 커밋·푸시하지 않았다.
+
+### Codex 저장 기본 모델 Strata 지정 (2026-11-01 저녁, 사용자 요청)
+
+Codex CLI와 ChatGPT Desktop의 저장 기본 모델이 `gpt-6-astra`로 남아 있어 대화가마다 선택을 요구했다. 사용자가 "코딩 앱이 OpenCodex로 Strata에 바로 연결되어 있게 해달라"고 요청해 `~/.codex/config.toml`의 `model` 한 줄을 `strata/qwen3.8-flash-next-unsloth-ud-iq4_xs`로 바꿨다(백업 `~/.codex/backups/manual-strata-default-20261101T110034Z/config.toml`). 경유 주소는 기존 `http://127.0.0.1:10100/v1`(OpenCodex) 그대로이고 다른 키는 건드리지 않았다.
+
+검증: `--model` 인수 없이 실행한 `codex exec`이 종료 0·`model: strata/...` 표시·응답 OK였다(추론 수준만 `low`로 덮어쓴 짧은 시험). `clients --check`은 `configured=true`, 항목 11개 전부 true, `codex_model_selection: strata_selected`였다. 반영 범위는 새 Codex 세션과 ChatGPT Desktop 재시작 이후이며, 열려 있던 대화의 선택은 그대로다. Claude Code CLI와 Desktop Code는 이전부터 게이트웨이·env가 OpenCodex 기본이라 변경이 없다. 외부 PC의 통합 설치기는 기존 설계대로 그 PC의 모델 선택을 보존하므로 이 기본값 변경이 자동 반영되지 않는다.
