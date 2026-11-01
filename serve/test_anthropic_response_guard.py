@@ -76,6 +76,23 @@ class GuardTests(unittest.TestCase):
         self.assertIs(guard_anthropic_events(events,{},enabled=False,with_tools=True),events)
         self.assertIs(guard_anthropic_events(events,{},enabled=True,with_tools=False),events)
 
+    def test_disabled_guard_streams_progress_before_tool_and_generation_end(self):
+        reached = []
+        def source():
+            yield from block(0, 'text', '작업을 확인하겠습니다.')
+            reached.append('tool')
+            yield from block(1, 'tool_use', '{"file":"a.txt"}')
+            reached.append('end')
+            yield from response([], 'tool_use')[-2:]
+        events = guard_anthropic_events(source(), {}, enabled=False, with_tools=True)
+        first = [next(events), next(events)]
+        self.assertEqual(text_of(first), '작업을 확인하겠습니다.')
+        self.assertEqual(reached, [])
+        remaining = list(events)
+        self.assertEqual(reached, ['tool', 'end'])
+        self.assertEqual(remaining[-2][1]['delta']['stop_reason'], 'tool_use')
+        self.assertEqual(remaining[-1][0], 'message_stop')
+
     def test_tool_narration_before_and_after_call_is_removed_and_arguments_stream(self):
         source=response(block(0,'thinking','reason')+block(1,'text','Saved already.')+
                         block(2,'tool_use','{"file":"a.txt"}')+block(3,'text','Complete!'),'tool_use')

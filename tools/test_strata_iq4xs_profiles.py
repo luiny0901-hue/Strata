@@ -78,6 +78,12 @@ class ProfileTemplateTests(unittest.TestCase):
                 self.assertEqual(profile['model_name'], MODEL_KEY)
                 self.assertEqual(profile['gpu'], 1)
                 self.assertEqual(profile['uncensored'], mode == 'on')
+                self.assertFalse(profile.get('anthropic_response_guard', False))
+                self.assertFalse(json.loads(normal.read_text(encoding='utf-8')).get('anthropic_response_guard', False))
+                if mode == 'on':
+                    ladder = {'low': 3072, 'medium': 4096, 'high': 8192, 'xhigh': 16384, 'max': 32768}
+                    self.assertEqual(profile['anthropic_effort_budgets'], ladder)
+                    self.assertEqual(json.loads(normal.read_text(encoding='utf-8'))['anthropic_effort_budgets'], ladder)
                 self.assertTrue(profile['log'].endswith('-1m.log'))
                 self.assertIs(profile['rope_auto'], True)
                 with self.assertRaises(ValueError):

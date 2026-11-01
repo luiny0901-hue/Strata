@@ -105,4 +105,4 @@ Desktop의 `/context`에서 `MCP tools` 합계는 제품 내장 Code·브라우�
 
 ## Messages 본문 전달 검사
 
-현재 ON 프로필은 `anthropic_response_guard: true`로 도구 요청의 일반 본문을 도구 선택이 끝날 때까지 보류하고, 도구와 함께 나온 본문을 제외한다. thinking·도구 인자는 계속 전달하고 도구 없는 최종 보고는 보존한다. 긴 일반 답변의 첫 본문 표시가 늦어질 수 있다. 명시적인 JSON 전용 지시에는 JSON 구간을 검증해 전달하며 값은 임의로 고치지 않는다. 기본 서버·OFF는 비활성이다. 동작·한계·원복·실측은 [CLAUDE_RESPONSE_DELIVERY_20261027_KO.md](CLAUDE_RESPONSE_DELIVERY_20261027_KO.md)를 확인한다. 해제하려면 ON 템플릿과 생성 프로필의 플래그를 false로 바꾸고 기존 재시작 도구를 사용한다.
+2026-11-01 중간 보고 복원 요청으로 ON 템플릿과 생성 프로필의 `anthropic_response_guard`를 false로 바꿨다. 도구와 함께 나온 일반 본문과 최종 답변을 더 이상 일괄 제거·보류하지 않는다. 이전 true 모드는 조기 완료 문장을 숨기는 대신 정상 진행 설명까지 제거했다. false에서는 해당 필터의 자연어 JSON-only 추출도 비활성이고, 별도 명시적 JSON Schema 검증은 그대로다. 완료 여부는 도구 결과·검증으로 판단하며 필터를 언어별 성공 판별기로 대체하지 않는다. 적용·원복·실측 범위는 [CLAUDE_RESPONSE_DELIVERY_20261027_KO.md](CLAUDE_RESPONSE_DELIVERY_20261027_KO.md)를 확인한다.

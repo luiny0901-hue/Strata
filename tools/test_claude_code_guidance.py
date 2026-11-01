@@ -58,6 +58,47 @@ class ProfessionalGuidanceTests(unittest.TestCase):
         self.assertIn('사용 가능한 `mcp__ccd_turn__wrap_up`을 호출한다', guide)
         self.assertIn('해당 앱 도구가 없는 CLI에서는 호출한 척하지 않는다', guide)
 
+    def test_execution_evidence_is_shared_with_codex_without_desktop_only_tools(self):
+        from tools.strata_client_settings import _codex_guide
+        for guide in (policy.guidance(), _codex_guide()):
+            self.assertEqual(guide.count(policy.CLIENT_EXECUTION), 1)
+            self.assertIn('0개 실행·과거 로그·다른 빌드의 통과', guide)
+            self.assertIn('재시도 전에 실제 파일·diff·소유 실행 상태', guide)
+            self.assertEqual(guide.count(policy.SHARED_PLANNING), 1)
+            self.assertIn('처음에는 딱 하나만 진행 중이고 나머지는 대기', guide)
+            self.assertIn('처음부터 모든 항목을 완료로 표시하지 않고', guide)
+            self.assertIn('최종 보고에서 목록 상태를 실제 결과와 일치시킨다', guide)
+        self.assertNotIn('mcp__ccd_turn__wrap_up', _codex_guide())
+        self.assertNotIn('mcp__ccd_turn__update_plan', _codex_guide())
+
+    def test_performance_decisions_reach_both_clients_from_shared_source(self):
+        from tools.strata_client_settings import _codex_guide
+        scope = policy.scope_policy()
+        for contract in [
+                '쉽고 빠르게 구현된다는 이유만으로 이 기준을 못 맞추는 방법을 고르지 않는다',
+                '대표·최대 데이터 크기, 동시 부하',
+                '미정 값은 가정과 미확인으로 구분',
+                '설계만 요청받았으면 선택 근거와 검증 방법까지만',
+                '같은 입력·기기·빌드 구성·정밀도·동시 부하',
+                '정확성 및 필요한 성능 지표를 함께 비교',
+                '전송·복사·동기화·메모리 비용까지 포함',
+                '정확도·보안·호환성·필수 기능을 몰래 낮춰',
+                '성능과 무관한 작은 수정에 별도 벤치마크를 강제하지 않는다']:
+            self.assertIn(contract, scope)
+        for guide in (policy.guidance(), _codex_guide()):
+            self.assertEqual(guide.count(scope), 1)
+
+    def test_progress_reports_reach_both_clients_without_requiring_thinking_display(self):
+        from tools.strata_client_settings import _codex_guide
+        for guide in (policy.guidance(), _codex_guide()):
+            self.assertEqual(guide.count('## 진행·최종 보고\n'), 1)
+            for contract in ['첫 도구 호출 전에', '일반 답변 본문으로 설명한다',
+                             '모든 설명을 최종 답변까지 미루지 않는다',
+                             '성공·완료는 결과 확인 뒤에만', '미확인 진척률']:
+                self.assertIn(contract, guide)
+        self.assertIn(policy.progress_policy(), _codex_guide())
+        self.assertNotIn('실행 종료 기준은 복구 지침을 따르며', _codex_guide())
+
     def test_missing_shared_section_is_reported_instead_of_silent_policy_loss(self):
         with self.assertRaisesRegex(ValueError, '장기'):
             policy.shared_sections('## 현재\n내용\n', {'장기'})

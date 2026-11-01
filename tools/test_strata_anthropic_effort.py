@@ -9,7 +9,8 @@ from tools.strata_anthropic_effort import (clean_anthropic_effort_budgets,
 
 class AnthropicEffortBudgetTests(unittest.TestCase):
     def test_opt_in_codex_labels_have_distinct_native_efforts_and_caps(self):
-        for wire, effort, cap in ((4096,'low',3072),(8192,'medium',4096),(16384,'high',8192)):
+        for wire, effort, cap in ((4096,'low',3072),(8192,'medium',4096),(16384,'high',8192),
+                                  (24576,'xhigh',16384),(32000,'max',32768)):
             req={'thinking':{'type':'enabled','budget_tokens':wire},'output_config':{'format':{'type':'json_schema'}}}
             mapped=request_with_anthropic_effort_budget(req, {}, codex_budget_labels=True)
             self.assertEqual(mapped['output_config'],{'format':{'type':'json_schema'},'effort':effort})

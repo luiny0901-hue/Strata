@@ -38,7 +38,8 @@ class ClientSettingsTests(unittest.TestCase):
         out = clients.model_projection(self.provider, self.settings, 262144)
         self.assertEqual(out['modelMaxOutputTokens'], {'other-model': 9000, 'test': 32000})
         self.assertEqual(out['modelContextWindows'], {'test': 262144})
-        self.assertEqual(out['modelReasoningEfforts'], {'test': ['low', 'medium', 'high']})
+        self.assertEqual(out['modelReasoningEfforts'],
+                         {'test': ['low', 'medium', 'high', 'xhigh', 'max']})
         self.assertEqual(out['headers'], {'Keep-Me': 'value', clients.WIRE_HEADER: clients.WIRE_VERSION})
         self.assertEqual(out['apiKey'], 'private-fixture')
         self.assertEqual(json.dumps(self.provider, sort_keys=True), before)
@@ -371,8 +372,74 @@ class ClientSettingsTests(unittest.TestCase):
         path.write_text('model_catalog_json = '+json.dumps(str(catalog))+'\nmodel_context_window=196000\n', encoding='utf-8')
         result = clients.audit(self.home)
         self.assertFalse(result['checks']['codex_context'])
-        self.assertEqual(result['codex_gateway_only_efforts'], ['max', 'ultra'])
+        self.assertEqual(result['codex_gateway_only_efforts'], ['ultra'])
         self.assertEqual(result['runtime_status'], 'not_verified')
+
+    def ready_audit_config(self):
+        self.write('.opencodex/config.json', {'providers': {'strata':
+            clients.model_projection(self.provider, self.settings, 262144)}})
+        self.write('catalog.json', {'models': [{'slug': 'strata/test', 'context_window': 262144,
+            'auto_compact_token_limit': 235929, 'supported_reasoning_levels': [
+                {'effort': v} for v in ['low', 'medium', 'high']]}]})
+        clients.sync_codex(self.home)
+        path = self.home/'.codex/config.toml'
+        path.write_text('model_catalog_json = '+json.dumps(str(self.home/'catalog.json'))+'\n'
+                        +path.read_text(encoding='utf-8'), encoding='utf-8')
+        return path
+
+    def test_audit_checks_effective_compaction_override_without_changing_it(self):
+        path = self.ready_audit_config()
+        original = path.read_text(encoding='utf-8')
+        for value, valid in [(120000, True), (0, False), (-1, False), (262144, False),
+                             (300000, False), (True, False), ('invalid', False)]:
+            with self.subTest(value=value):
+                text = 'model_auto_compact_token_limit = '+json.dumps(value)+'\n'+original
+                path.write_text(text, encoding='utf-8')
+                result = clients.audit(self.home)
+                self.assertEqual(result['checks']['codex_auto_compaction'], valid)
+                self.assertEqual(result['codex_compaction_trigger'], value)
+                self.assertEqual(result['codex_catalog_compaction_trigger'], 235929)
+                self.assertEqual(path.read_text(encoding='utf-8'), text)
+
+    def test_audit_detects_missing_or_changed_guidance_and_preserves_user_text(self):
+        self.ready_audit_config()
+        path = self.home/'.codex/AGENTS.md'
+        guide = path.read_text(encoding='utf-8')
+        for text, valid in [(None, False), ('사용자 지침만 있음\n', False),
+                            (guide, True), ('내 개인 규칙\n'+guide, True),
+                            (guide.replace('MCP 등록은', '수정된 MCP 등록은'), False),
+                            (guide+guide, False)]:
+            with self.subTest(text=text and text[:25]):
+                if text is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    path.write_text(text, encoding='utf-8')
+                result = clients.audit(self.home)
+                self.assertEqual(result['checks']['codex_guidance'], valid)
+                self.assertEqual(result['configured'], valid)
+                self.assertEqual(path.read_text(encoding='utf-8') if path.exists() else None, text)
+
+    def test_audit_reports_other_selected_model_without_replacing_it(self):
+        path = self.ready_audit_config()
+        original = path.read_text(encoding='utf-8')
+        for model, status in [('strata/test', 'strata_selected'), ('other/model', 'another_model_selected')]:
+            with self.subTest(model=model):
+                text = 'model = '+json.dumps(model)+'\n'+original
+                path.write_text(text, encoding='utf-8')
+                result = clients.audit(self.home)
+                self.assertTrue(result['configured'])
+                self.assertEqual(result['codex_saved_model'], model)
+                self.assertEqual(result['codex_model_selection'], status)
+                self.assertEqual(path.read_text(encoding='utf-8'), text)
+
+    def test_audit_rejects_invalid_mcp_timeout_without_crashing(self):
+        path = self.ready_audit_config()
+        original = path.read_text(encoding='utf-8')
+        for value, valid in [(660, True), (600, False), (60, False), (True, False), ('660', False)]:
+            with self.subTest(value=value):
+                path.write_text(original.replace('tool_timeout_sec = 660',
+                    'tool_timeout_sec = '+json.dumps(value)), encoding='utf-8')
+                self.assertEqual(clients.audit(self.home)['checks']['codex_mcp_call_timeout'], valid)
 
     def test_external_client_projection_does_not_edit_or_probe_model_gateway(self):
         with patch.object(Path, 'home', return_value=self.home), \

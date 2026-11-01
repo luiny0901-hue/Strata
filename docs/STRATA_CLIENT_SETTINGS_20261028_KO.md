@@ -2,6 +2,8 @@
 
 Claude Code CLI·Claude Desktop Code·Codex가 같은 모델을 선택해도 모든 앱 설정이 자동으로 복제되지는 않는다. 모델 기능은 OpenCodex 공급자가 공유하고, MCP 실행·지침·권한·압축·완료 표시는 각 클라이언트가 소유한다. 다른 모델을 선택했을 때의 설정까지 Strata 값으로 덮어쓰지 않는다.
 
+아래 262K 값은 2026-10-28의 관측이다. 2026-11-01 현재 서버·모델 카탈로그는 1,048,576토큰, Claude 저장 압축 창은 1,000,000, Codex 저장 압축 시작점은 943,718, 기본 출력 상한은 32,000이다. 새 관측과 자율 작업 범위는 문서 마지막 절을 따른다.
+
 ## 적용한 공통 값
 
 | 항목 | 현재 Strata 기준 | 적용 범위 |
@@ -53,3 +55,55 @@ Linux/macOS 진입점은 `./setup-claude-opencodex.sh clients`와 `clients --che
 - 현재 Desktop/Codex 화면의 선택·새 MCP 호출·262K 압축·성능/품질 비교·다른 OS·외부 PC 실제 연결은 이번에 검증하지 않았다. Codex를 재시작한 뒤 Strata를 다시 선택하고 새 세션에서 MCP를 확인한다. Strata·OpenCodex·Claude Desktop의 실행 중 작업은 재시작하지 않았다.
 
 실행 근거: `C:/Users/luiny/Strata-data/diagnostics/client-settings-20261028/`. 커밋·푸시는 하지 않았다.
+
+## 2026-11-01 자율 작업 점검
+
+연결과 작업 루프는 준비되어 있지만, 권한 생략·큰 컨텍스트·HTTP 200만으로 완전 무인 개발을 보장하지 않는다. 도구 실행은 클라이언트가, 추론은 선택된 모델이 담당한다. 명세 해석·설계 판단·회귀 검증·외부 승인·실기 시험은 실제 작업별 근거가 필요하다.
+
+### 확인된 상태
+
+- Windows 11, Claude Code CLI `2.1.308`, Codex CLI `0.166.0-alpha.5.1`, OpenCodex 서비스 `2.92.0`을 확인했다. OpenCodex와 실제 Strata 모델 health는 준비 상태였다. GPU는 모델을 올린 RTX 3090 Ti, 모델은 Qwen3.8 Flash Next Unsloth UD-IQ4_XS다. 정밀도·모델·추론 단계·GPU 설정은 변경하지 않았다.
+- Claude Desktop Code의 저장 게이트웨이는 OpenCodex이며 현재 유지보수 세션에서 도구 검색·파일 수정·명령 실행·검사 결과 수집을 수행했다. 이 사실을 장시간 무인 실행이나 전체 GUI 품질 검증으로 확대하지 않는다.
+- Codex 설정의 `openai_base_url`은 `http://127.0.0.1:10100/v1`이나 기본 모델은 `gpt-6-astra`였다. CUA 읽기 전용 창 검사에서 ChatGPT 데스크톱의 **현재 모드: Codex**와 열린 대화의 Strata→GPT-6 Astra 모델 변경 기록을 확인했다. 사용자가 선택한 모델이나 기존 대화를 임의로 바꾸지 않았다. 일반 ChatGPT 채팅 모드를 이 코딩 경로와 동일하게 취급하지 않는다.
+- 보조 에이전트와 WebFetch는 별도 모델 계정의 사용량 정책으로 HTTP 429를 반환했다. Strata health 정상과 구분한다. 보호 설정 해제·계정 자동 전환·반복 재시도는 하지 않았다. 공개 검색 결과는 확보했으나 공식 원문 확인은 도구 오류로 미완료다.
+
+### 개선과 적용 범위
+
+- `tools/claude_code_guidance.py`의 `CLIENT_EXECUTION`을 Claude·Codex 지침 생성에서 공유한다. Codex는 복잡한 작업에서만 읽던 별도 문서에 의존하지 않고, 매 세션 기본 지침에 실제 도구 결과·필수 작업 완료·검사 수·취소·재시도 전 부작용 확인 기준을 받는다. Claude 전용 완료 도구는 Codex에 복제하지 않는다. 지침은 모델의 준수율을 보장하는 강제 실행기나 새 에이전트 루프가 아니다.
+- `audit()`는 카탈로그 값보다 우선하는 `model_auto_compact_token_limit`을 실제 검사·보고에 사용한다. 0·음수·컨텍스트 이상·잘못된 형식은 정상으로 보고하지 않는다. 원래 카탈로그 값은 `codex_catalog_compaction_trigger`로 따로 남긴다.
+- 공통 Codex 지침의 누락·중복·내용 차이를 `checks.codex_guidance`로 검출한다. 개인 지침은 보존한다. MCP 제한 시간은 숫자 형식과 기존 660초 기준을 검사해 문자열 비교 오류와 디스패처의 600초 제한 직전 종료를 막는다. 이 진단은 실제 도구 성공의 증거가 아니다.
+- 저장된 기본 모델은 `codex_saved_model`·`codex_model_selection`으로 별도 보고한다. 다른 모델을 선택했다고 공통 모델 정보까지 덮거나 설정 불일치로 간주하지 않는다. 프로필·명령 인수·열린 대화의 선택은 여전히 별도 확인 대상이다.
+- `--codex-only`를 실제 적용해 사용자 `.codex/AGENTS.md`와 소유 해시 `strata-clients.json` 두 파일만 갱신했다. 기존 설정 파일·모델 선택·권한·MCP 등록은 변경하지 않았다. 백업 영수증은 `~/.codex/backups/strata-opencodex-20261031T225057151774Z/files.json`이며 재적용은 변경 0개였다. 현재 열린 대화의 지침을 소급 교체하지 않으므로 새 Codex 대화에서 사용한다. Claude 지침 생성 소스는 갱신했으나 사용자 전역 Claude 지침의 별도 사용자 변경은 덮어쓰지 않았다.
+- Strata·OpenCodex·Desktop을 재시작하거나 새 서비스·감시 루프·강제 자동 승인을 추가하지 않았다. 서버 엔진 코드는 변경하지 않았다.
+
+### 검증
+
+새 진단 회귀 검사 4개는 수정 전 실패 8건·오류 9건으로 누락을 재현했다. 수정 뒤 Python 3.14.7에서 `py -B -X utf8 -m unittest tools.test_strata_client_settings tools.test_claude_code_guidance -q` 40개, `py -B -X utf8 -m unittest tools.test_claude_opencodex_client tools.test_claude_maintenance -q` 106개가 모두 통과했다. 이는 CPU 계약 검사이며 GPU 성능이나 모델 판단 품질의 개선율이 아니다. 새 프로세스의 `tools/strata_client_settings.py --check`도 통과했다. 이미 연결된 유지보수 MCP는 재연결 전까지 이전 코드를 유지할 수 있다.
+
+실제 Strata 생성으로 두 CLI에 같은 할인 계산 오류를 수정하게 했다. 각각 격리된 폴더와 원래 테스트 5개, 수정 금지 파일을 사용했으며 외부 게시·서비스 변경은 허용하지 않았다.
+
+- **Claude CLI**: 처음에는 Desktop 자식 프로세스의 환경 변수를 상속해 `Not logged in`으로 종료 1, 파일 변경 없음이었다. 별도 시험 프로세스에서 Desktop 전용 `CLAUDE_*` 변수를 분리하고 기존 사용자 설정을 읽게 한 재검사에서는 종료 0·7턴·26.31초였다. 실제 테스트의 수정 전 2개 실패, 한 줄 수정, 수정 후 5개 통과를 확인했다. 이는 사용자 셸의 일반 Claude CLI에 로그인 장애가 있다는 뜻이 아니다. 운영 실행기나 전역 환경은 변경하지 않았다.
+- **Codex CLI**: `--model strata/qwen3.8-flash-next-unsloth-ud-iq4_xs --sandbox workspace-write`를 해당 시험 실행에만 지정했다. 종료 0·116.86초였고 수정 전 실패 확인·한 줄 수정·수정 후 5개 통과를 완료했다. 샌드박스에서 `py`가 보이지 않아 설치된 Python 3.12.15의 경로를 찾는 데 많은 조회가 들었다. 완료된 셸 명령은 31개였다. 완전한 효율 개선이나 무인 작업 품질을 보장하는 결과로 보지 않는다.
+- 부모 검사기도 두 결과를 각각 Python 3.14.7로 다시 검사해 5개씩 통과했고, 테스트 파일·보호 파일의 SHA-256은 전후 동일했다. 이 시간들은 샌드박스·실행 환경·탐색 횟수가 달라 성능 비교나 개선율로 사용하지 않는다.
+
+### 계획·체크리스트 표시 (2026-11-01 추가 점검)
+
+Claude Desktop Code의 작업 체크리스트는 앱 내장 `mcp__ccd_turn__update_plan`·`wrap_up` 도구이며 저장소 코드가 아니라 앱이 렌더링한다. 같은 세션에서 작업 시작 시 전체 목록 생성 → 단계별 갱신 → 종료 시 마감하는 흐름을 실제로 사용·확인했다. 나머지 경로에 계획 전용 도구가 있는지는 실제 질문으로 확인했다.
+
+- 터미널 Claude CLI(headless): 모델 자기 도구 목록에 TodoWrite·계획 도구가 없고 없음 응답(self-report). Codex CLI: plan·todo 전용 도구 없음(읽기 전용 실행 2회). ChatGPT Desktop은 같은 Codex 지침을 쓰므로 별도 도구가 없다. 세 경로 모두 체크리스트 UI는 앱이 제공하지 않으며, 항목별 진행 표시는 답변 텍스트로만 드러난다.
+- 모든 표면에 같은 기준을 넣었다: 계획 도구가 있으면 처음에 전체 목록을 만들되 처음에는 딱 하나만 진행 중이고 나머지는 대기로 둔다. 끝난 단계만 근거를 가지고 갱신하고 최종 보고에서 목록 상태와 실제 결과를 일치시킨다. 처음부터 모든 항목을 완료로 두거나 목록 만들기를 진행으로 보지 않는다. 도구가 없으면 호출한 척하지 않고 3단계 이상 작업에서 번호 진행 목록을 텍스트로 유지한다(`tools/claude_code_guidance.py`의 `SHARED_PLANNING`, Claude·Codex 생성기 공유. 지침은 준수율 보장이 아니다).
+- Codex에는 `--codex-only`로 실제 적용(변경 2개, 백업 `~/.codex/backups/strata-opencodex-20261031T230844569092Z`, 재적용 0개, audit 통과). Claude 전역 지침은 이 worktree에서 `setup`을 다시 적용하면 main 체크아웃 기준 설치본보다 오래된 문구로 되돌아갈 수 있어 설정기가 거부했고, 전체 재생성 대신 설치된 `~/.claude/CLAUDE.md`에 빠져 있던 wrap_up 항목 복원과 계획 유지 항목 추가만 했다. 두 설치 지침 파일에 항목이 1회 존재함을 확인했고 관련 검사 40개 통과. 이후 어느 쪽 `setup`도 해시 불일치로 재확인을 요구한다.
+- 미검증: 새 Codex·ChatGPT 대화에서 체크리스트 기준을 따르는지, CLI headless 도구 목록은 모델 자기 보고라 완전성은 보장하지 않는다. Claude Desktop의 체크리스트 렌더링 자체는 앱 소유이며 저장소 변경 없이 이미 동작 중이다.
+
+### 기술 선택·성능 검증 기준 보강 (2026-11-01)
+
+기존 Claude·Codex 설치 지침 모두 구현 편의보다 대상 기기의 성능·자원 기준을 우선하고, 알고리즘·자료구조·입출력 병목부터 확인하도록 되어 있었다. 이번에는 `examples/claude/KOREAN_INSTRUCTIONS.md`의 기존 `구현 범위` 절에 두 항목만 추가했다. Claude 생성기는 이 절을 포함하며 Codex 생성기도 `scope_policy()`로 같은 절을 직접 포함하므로 별도 정책 파일이나 모델별 설정을 만들지 않았다.
+
+- 설계 시 핵심 흐름·대표/최대 데이터·동시 부하·지연/처리량/메모리 한도를 정리하고, 요구와 가정을 구분한다. 설계 전용 요청은 구현이나 실측을 한 것처럼 보고하지 않는다.
+- 구현 시 같은 입력·기기·빌드·정밀도·부하로 정확성과 성능을 함께 비교한다. 캐시·초기 실행·측정 변동·긴 지연·최대 메모리와 전송/동기화 비용을 고려하고 정확도·보안·호환성을 낮춰 속도를 얻지 않는다. 효과 없는 복잡도를 남기지 않고 작은 무관한 수정에 벤치마크를 강제하지 않는다.
+
+실제 적용: Claude CLI·Desktop Code가 사용하는 `~/.claude/CLAUDE.md`에 해당 두 항목만 기존 게시 함수로 백업·동시 변경 검사 후 삽입했다. 두 항목을 제거한 나머지가 원본 바이트와 일치함을 확인했다. 수동 수정된 설치본의 전체 재생성이나 소유 해시 덮어쓰기는 하지 않았다. Codex CLI·ChatGPT Desktop의 Codex 모드가 사용하는 `~/.codex/AGENTS.md`는 기존 `sync_codex()`로 갱신했다. 열린 대화·프로필별 추가 지침의 실제 반영은 별도이며 새 세션에서 읽는다. 일반 ChatGPT 채팅 모드까지 적용된다는 뜻은 아니다.
+
+백업: `~/.claude/backups/strata-opencodex-20261101T062028047595Z`와 `~/.codex/backups/strata-opencodex-20261101T062028088463Z`. 재적용은 양쪽 모두 변경 0개, 저장 진단은 `configured=true`였다. `py -B -X utf8 -m unittest tools.test_claude_code_guidance tools.test_strata_client_settings -q`로 41개 검사를 통과했고 `git diff --check`도 통과했다. 생성 지침 전달·설정 보존 검사이며, 네 클라이언트의 새 실제 설계 작업이나 생성된 제품의 성능 비교는 이번에 실행하지 않았다. 지침 보강을 모든 작업의 최적화 보장으로 해석하지 않는다. 모델·추론 수준·서비스·권한은 변경하지 않았다.
+
+현재 체크아웃의 진단 산출물(버전 관리 제외): [Claude 최종 영수증](../.strata-mcp/autonomy-check-20261101/claude-standalone-summary.json), [Codex 최종 영수증](../.strata-mcp/autonomy-check-20261101/codex-summary.json), [Claude 독립 검사](../.strata-mcp/autonomy-check-20261101/claude-standalone-tests.log), [Codex 독립 검사](../.strata-mcp/autonomy-check-20261101/codex-tests.log). 단순 계산 수정의 도구 왕복·검증 증거이며, 새 ChatGPT Desktop 대화에서 같은 수정을 끝내는 시험·장시간 작업·1M 압축 경계·재부팅 복구·다른 OS는 이번에 실행하지 않았다. 커밋·푸시하지 않았다.

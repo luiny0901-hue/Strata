@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 
-EFFORT_LEVELS = ("low", "medium", "high")
+EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
 MAX_EFFORT_BUDGET = 262144
-CODEX_WIRE_EFFORTS = {4096: "low", 8192: "medium", 16384: "high"}
-CODEX_DEFAULT_BUDGETS = {"low": 3072, "medium": 4096, "high": 8192}
+# OpenCodex's generic Anthropic adapter encodes the selected label as its own
+# thinking budget (reasoningBudget: low 4096, medium 8192, high 16384,
+# xhigh 24576, max 32000). These five labels round-trip under the wire header.
+CODEX_WIRE_EFFORTS = {4096: "low", 8192: "medium", 16384: "high", 24576: "xhigh", 32000: "max"}
+CODEX_DEFAULT_BUDGETS = {"low": 3072, "medium": 4096, "high": 8192, "xhigh": 16384, "max": 32768}
 
 
 def clean_anthropic_effort_budgets(value) -> dict[str, int]:

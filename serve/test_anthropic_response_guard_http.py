@@ -59,6 +59,20 @@ class MessagesGuardHTTP(unittest.TestCase):
             _,reply=self.post(text,tools=[TOOL])
             self.assertEqual(''.join(b.get('text','') for b in reply['content']),text)
 
+    def test_disabled_guard_delivers_progress_before_tool_in_http_stream(self):
+        self.svc.anthropic_response_guard = False
+        code, raw = self.post('확인하겠습니다.\n'+CALL, tools=[TOOL], stream=True)
+        self.assertEqual(code, 200)
+        packets = [json.loads(line[6:]) for line in raw.splitlines() if line.startswith('data: ')]
+        texts = [i for i, p in enumerate(packets) if p.get('delta', {}).get('type') == 'text_delta']
+        tools = [i for i, p in enumerate(packets) if p.get('content_block', {}).get('type') == 'tool_use']
+        self.assertTrue(texts)
+        self.assertTrue(tools)
+        self.assertLess(texts[0], tools[0])
+        self.assertIn('확인하겠습니다.', ''.join(packets[i]['delta']['text'] for i in texts))
+        self.assertEqual(packets[-2]['delta']['stop_reason'], 'tool_use')
+        self.assertEqual(packets[-1]['type'], 'message_stop')
+
     def test_json_excludes_prose_in_stream_and_nonstream_replies(self):
         for stream in (False,True):
             code,reply=self.post('설명입니다.\n{"modules":["core"],"cost":4}',system='Return only JSON.',stream=stream)

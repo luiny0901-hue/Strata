@@ -20,11 +20,11 @@ except ImportError:  # Do not break the existing Python 3.10 Claude-only doctor.
 
 if __package__:
     from . import claude_opencodex_client as shared
-    from .claude_code_guidance import language_reminder, validation_policy, scope_policy, CUA_INPUT_POLICY
+    from .claude_code_guidance import language_reminder, validation_policy, scope_policy, progress_policy, CUA_INPUT_POLICY, CLIENT_EXECUTION, SHARED_PLANNING
     from .strata_anthropic_effort import EFFORT_LEVELS
 else:
     import claude_opencodex_client as shared
-    from claude_code_guidance import language_reminder, validation_policy, scope_policy, CUA_INPUT_POLICY
+    from claude_code_guidance import language_reminder, validation_policy, scope_policy, progress_policy, CUA_INPUT_POLICY, CLIENT_EXECUTION, SHARED_PLANNING
     from strata_anthropic_effort import EFFORT_LEVELS
 
 MODEL_FIELDS = ('modelContextWindows', 'modelMaxOutputTokens',
@@ -402,7 +402,8 @@ def _codex_guide():
         '현재 상태·변경·검증 및 장기 개발·유지보수 기준을 읽는다. 상세 엔진/데스크톱 지침은 '
         f'`{(root/"examples/claude/game-engines").as_posix()}` 또는 '
         f'`{(root/"examples/claude/professional").as_posix()}`에서 해당 대상 하나만 읽는다.\n\n'
-        +scope_policy(root)+'\n\n'+validation_policy(root)+'\n\n'+
+        +scope_policy(root)+'\n\n'+validation_policy(root)+'\n\n'+progress_policy(root)+'\n\n'+
+        '## 실행·검증·완료\n\n'+CLIENT_EXECUTION+'\n- '+SHARED_PLANNING+'\n\n'+
         'GUI·역분석·웹 검색이 필요할 때만 agent-tools의 검색으로 필요한 하위 도구를 찾고 반환된 정확한 이름·스키마로 호출한다. '
         'GUI 화면 조작은 항상 agent-tools를 통해 얻는 CUA로 수행하고 클라이언트가 내장한 Computer Use 도구는 사용하지 않는다. '
         +CUA_INPUT_POLICY+' '+
@@ -482,6 +483,16 @@ def audit(home):
     levels = [r.get('effort') for r in row.get('supported_reasoning_levels', []) if isinstance(r, dict)]
     window, source = shared.saved_compaction_window(settings, model, context or 262144)
     effective_codex_context = codex.get('model_context_window', row.get('context_window'))
+    effective_codex_compaction = codex.get('model_auto_compact_token_limit', row.get('auto_compact_token_limit'))
+    mcp_timeout = codex.get('mcp_servers', {}).get('agent-tools', {}).get('tool_timeout_sec', 60)
+    guide_path = home/'.codex/AGENTS.md'
+    guide = guide_path.read_text(encoding='utf-8') if guide_path.is_file() else ''
+    expected_guide = _codex_guide().rstrip('\n')
+    guidance_current = (guide.count(GUIDE_START) == guide.count(GUIDE_END) == 1
+                        and expected_guide in guide)
+    saved_model = codex.get('model')
+    model_selection = ('not_configured' if saved_model is None else
+                       'strata_selected' if saved_model == model else 'another_model_selected')
     def native_server(name):
         entry = codex.get('mcp_servers', {}).get(name)
         expected = native.get('mcpServers', {}).get(name)
@@ -494,15 +505,17 @@ def audit(home):
         'claude_context': context is not None and env.get('CLAUDE_CODE_MAX_CONTEXT_TOKENS') == str(context),
         'claude_output': output is not None and env.get('CLAUDE_CODE_MAX_OUTPUT_TOKENS') == str(output),
         'codex_context': bool(row) and effective_codex_context == context,
-        'codex_auto_compaction': (type(row.get('auto_compact_token_limit')) is int
+        'codex_auto_compaction': (type(effective_codex_compaction) is int
             and type(effective_codex_context) is int
-            and 0 < row['auto_compact_token_limit'] < effective_codex_context),
+            and 0 < effective_codex_compaction < effective_codex_context),
         'native_efforts': provider.get('modelReasoningEfforts', {}).get(model_id) == list(EFFORT_LEVELS),
         'default_effort': provider.get('modelDefaultReasoningEfforts', {}).get(model_id) == settings.get('effortLevel'),
         'effort_wire': any(k.lower() == WIRE_HEADER and v == WIRE_VERSION
                            for k, v in provider.get('headers', {}).items()),
         'codex_agent_tools': native_server('agent-tools'),
-        'codex_mcp_call_timeout': codex.get('mcp_servers', {}).get('agent-tools', {}).get('tool_timeout_sec', 60) >= 600,
+        'codex_mcp_call_timeout': (type(mcp_timeout) in (int, float)
+                                   and mcp_timeout >= MCP_CALL_TIMEOUT_SECONDS),
+        'codex_guidance': guidance_current,
     }
     return {'checks': checks, 'configured': all(checks.values()), 'model': model,
         'context': context, 'default_max_output_tokens': output,
@@ -510,8 +523,11 @@ def audit(home):
         'codex_advertised_efforts': levels,
         'codex_gateway_only_efforts': [v for v in levels if v not in EFFORT_LEVELS],
         'claude_compaction_window': window, 'claude_compaction_source': source,
-        'codex_compaction_trigger': row.get('auto_compact_token_limit'),
+        'codex_compaction_trigger': effective_codex_compaction,
+        'codex_catalog_compaction_trigger': row.get('auto_compact_token_limit'),
         'codex_effective_context': effective_codex_context,
+        'codex_saved_model': saved_model, 'codex_model_selection': model_selection,
+        'codex_guidance_status': 'current' if guidance_current else 'missing_or_different',
         'codex_global_context_override': codex.get('model_context_window'),
         'codex_global_compaction_override': codex.get('model_auto_compact_token_limit'),
         'runtime_status': 'not_verified',

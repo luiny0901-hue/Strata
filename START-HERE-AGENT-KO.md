@@ -27,7 +27,11 @@
 
 설치·외부 PC 연결·진단은 [Claude Desktop Code 연결 안내](docs/CLAUDE_OPENCODEX_KO.md)를 따르세요. 터미널 Claude Code 실행기는 별도이며 Desktop Code 화면을 열지 않습니다.
 
+중간 진행 설명이 안 보일 때는 생각 표시나 상세 도구 보기와 일반 답변 본문 전달을 구분하세요. 현재 ON은 진행 본문을 제거하던 응답 필터를 끄고 원래 스트리밍을 사용합니다. Claude의 Normal 보기에도 일반 진행 본문이 표시됩니다. [진행 본문 복원과 검증 범위](docs/CLAUDE_RESPONSE_DELIVERY_20261027_KO.md#2026-11-01-진행-본문-복원)를 참고하세요.
+
 Codex도 함께 사용하려면 기존 Claude 연결을 마친 뒤 `setup-claude-opencodex.bat clients`를 실행합니다. Strata의 공통 모델 정보와 Codex의 지연 MCP·한국어 지침을 연결하고, 기존 모델 선택·권한은 보존합니다. `clients --check`는 변경 없이 차이를 확인합니다. [클라이언트별 적용 범위](docs/STRATA_CLIENT_SETTINGS_20261028_KO.md)를 확인하고 새 Codex 세션에서 연결을 확인하세요.
+
+자율 코딩은 파일 수정·테스트·결과 확인까지 이어지는 클라이언트의 작업 흐름입니다. 연결이 정상이어도 현재 선택한 모델이 Strata라는 뜻은 아닙니다. ChatGPT 데스크톱은 **Codex 모드**에서 작업 폴더와 Strata 모델을 확인하세요. 진단의 `codex_model_selection`은 저장된 기본 모델만 나타내고 열린 대화의 선택을 대신하지 않습니다. 일반 채팅 모드나 권한 확인 생략을 완전 자율 코딩과 혼동하지 마세요. 실패·승인 대기·검증 미완료는 완료로 처리하지 않으며, 자세한 확인 결과는 [자율 작업 점검](docs/STRATA_CLIENT_SETTINGS_20261028_KO.md#2026-11-01-자율-작업-점검)에 있습니다.
 
 Claude Desktop Code에서 웹 페이지 읽기는 `WebFetch`를 사용할 수 있습니다. 내장 웹 검색이 Strata 경로에서 실패할 때 선택형 검색을 설정하는 방법은 [웹 검색 안내](docs/CLAUDE_WEB_SEARCH_KO.md)를 참고하세요.
 

@@ -79,6 +79,7 @@
   "reasoning_budget_tokens": 8192,
   "reasoning_close_retry": true,
   "effort_position": "end",
-  "anthropic_response_guard": true,
-  "ban_cjk_tokens": true
+  "anthropic_response_guard": false,
+  "ban_cjk_tokens": true,
+  "anthropic_effort_budgets": {"low": 3072, "medium": 4096, "high": 8192, "xhigh": 16384, "max": 32768}
 }

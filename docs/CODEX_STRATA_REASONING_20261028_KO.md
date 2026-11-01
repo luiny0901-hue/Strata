@@ -39,6 +39,36 @@ Max는 현재 Strata에서 별도 native 단계가 아니며 high와 같은 내�
 
 실제 Codex GUI 선택창·262K 작업·장시간 품질 차이·Ultra 자동 위임은 미검증이다. [Codex 공식 설정 문서](https://learn.chatgpt.com/docs/config-file/config-reference)는 `model_catalog_json`이 시작 시 읽힌다고 명시한다. **Codex를 재실행하고 해당 Strata 모델을 다시 선택**해 갱신된 카탈로그를 사용한다.
 
+## 2026-11-01 갱신: 매우 높음·최대 단계 추가
+
+사용자 요청으로 사다리를 5단계로 확장했다. 근거: ON 서버 로그에 `thinking budget reached (8192)` 조기 종료가 실제 관측되어 상한 확대 실익이 확인된 요청 유형이 있었다.
+
+- `tools/strata_anthropic_effort.py`의 `EFFORT_LEVELS`·Codex 라벨 매핑을 low/medium/high/xhigh/max로 확장했다. OpenCodex 어댑터의 `reasoningBudget`(low 4096/medium 8192/high 16384/xhigh 24576/max 32000)을 그대로 라벨 역매핑에 사용했고 기본 상한은 3072/4096/8192/**16384/24576**다. 헤더 표식 문자열(`opencodex-low-medium-high-v1`)은 호환성 유지로 그대로 둔다.
+- ON 템플릿 두 곳(운영 루트·체크아웃)의 `anthropic_effort_budgets`에 `xhigh: 16384`, `max: 24576`을 추가했다(전역 `reasoning_budget_tokens: 8192`는 유지 — 단계별 상한만 확장). OFF·게이트웨이 외 설정은 그대로다. OpenCodex 사다리는 소유 설정기로 5단계 재게시(백업 `strata-provider-jndo0496.json`).
+- 운영 루트의 실행 중 코드(`C:/Users/luiny/Strata/tools/strata_anthropic_effort.py`)가 이전 3단계판이었어서 수정본으로 동기 복사한 뒤 supervisor 재시작(`effort-ladder-5-20261101-1`, ready)했다. 재시작 로그: `Anthropic reasoning budgets: low=3072, medium=4096, high=8192, xhigh=16384, max=24576 tokens`.
+- 실측: Codex 라벨 방식(`thinking.enabled` 24576/32000) 요청이 서버에서 각각 `budget 16384`·`budget 24576`로 처리됨을 supervisor 로그로 확인했다. 네이티브 어댑티브 방식은 OpenCodex가 예산 형태로 바꾸지 않으면 서버 전역 기본(8192)이 유지되므로 상위 단계를 쓰려면 Codex 경로처럼 라벨 예산이 전달되는 형태로 요청해야 한다(어댑티브 라벨 전용 경로는 미지원 상태 그대로).
+- 검사: `tools.test_strata_anthropic_effort`(5단계 라벨 매핑), `tools.test_strata_client_settings`(115 포함 묶음), `tools.test_strata_iq4xs_profiles`(ON 사다리 불변 검사 추가) 통과. 템플릿 재적용 멱등 확인.
+- 사용: Codex는 재실행해 카탈로그를 다시 읽으면 Strata 행에 매우 높음·최대가 노출된다. Desktop Code의 선택기 노출은 화면 확인 전(미검증). 쉬운 질문은 상한과 무관하게 일찍 끝나며, 상위 단계 도달 시 대기 상한은 16384≈약 172초, 24576≈약 259초다. 상위 단계의 품질 이득은 여전히 미측정이다.
+
+## 2026-11-01 늦은 시각: 네 경로 상위 단계 인식 검증과 Claude 경로 상한 수정
+
+사용자 요청으로 매우 높음·최대의 4경로 인식 여부를 실측했다.
+
+- **서버**: `budget 16384`까지 생각한 로그(16,342토큰까지 사용)와 `budget 24576` 캡 로그가 서버 로그에 실제로 남아 상위 예산 처리가 확인됐다. Codex 라벨 방식은 earlier절에서 이미 확인.
+- **Codex CLI·ChatGPT Desktop(Responses 표면)**: 카탈로그는 이미 low..max+ultra 6종 노출 중(`--check`의 advertised 확인). OpenCodex가 Strata를 어댑티브 모델로 처리하도록 `modelCapabilities.<model>.supportsReasoningEffort=true`를 단일 공급자 POST로 추가했다(기존 inputModalities 보존, 즉시 반영·재시작 불필요). 이후 `reasoning.effort=xhigh/max`가 어댑티브 라벨로 전달되고 OpenCodex 로그의 requestedEffort에 `xhigh`·`max`가 그대로 찍혔다. 같은 프롬프트의 생각 분량이 previous(8192 고정) 대비 194초/107초로 길어져 상위 예산 동작과 일치했다. 단 로그의 표면 필드가 없는 요청은 귀속을 강하게 보지 않는다.
+- **Claude CLI·Desktop Code(Anthropic 표면)**: `--effort xhigh|max`가 `Effort 'xhigh' exceeds the cap ...; using 'high'`로 강등되는 것을 발견. 원인은 Claude Code 상한 설정 두 곳: `~/.claude/settings.json`의 `maxEffortLevel: "high"`와 커스텀 모델 능력 미선언. 공식 문서 기준 `maxEffortLevel`은 `low|medium|high|xhigh|max`를 받고 능력 키는 `xhigh_effort`·`max_effort`다. 이를 반영해 `maxEffortLevel`을 `max`로, `ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES`를 `effort,xhigh_effort,max_effort,thinking`으로 수정했다(백업 없이 사용자 설정 최소 병합; 강등 경고 사라짐 확인, exit 0). 단 `ANTHROPIC_BASE_URL` 게이트웨이에서 능력 변수가 UI 상한까지 여는지는 문서에 보장돼 있지 않아, 이 경로가 실제 서버에서 `budget 16384/24576`를 내보내는지는 새 Desktop 세션에서 별도 확인이 필요하다(현재까지 해당 예산 로그는 Responses·직접 Messages 시험에서 확인).
+- 수정 파일: `~/.claude/settings.json`(2키), OpenCodex `providers.strata.modelCapabilities`(관리 API POST, 백업 없음·되돌리기는 같은 필드 제거). Strata/OpenCodex/Desktop 재시작 없음. 검사 변경 없음(설정·실행 검증만). 커밋 없음.
+
+## 2026-11-01 심야: 자율 코딩 장기 운전 기준 재조정 (출력 65536, max 32768)
+
+사용자 승인(“그렇게하고…개선해”)으로 두 값을 올렸다. 근거: 커뮤니티는 기본 중간·필요 시 승격을 권하고, Qwen3-Coder 예제는 32,768 생성을 사용. 최대 단계가 답변 자리 7,400만 남기는 문제가 이 환경의 실제 제약이어서 합산 상한을 함께 확대했다.
+
+- **전체 출력(생각+답변) 기본값 32,000→65,536**: `~/.claude/settings.json`의 `CLAUDE_CODE_MAX_OUTPUT_TOKENS`와 설정기 재투영(`--codex-only` 아님, 기본 경로; 백업 `strata-provider-vzx1tfc8.json`)으로 반영. `--check`의 claude_output·출력 표시 65536 확인. 요청이 `max_tokens`를 명시하지 않는 경로에 적용되며, 명시 요청(예: Claude의 32,000 고정 경로가 있다면)은 그 값을 따른다. 초과분은 `fit_max_tokens` 자동 축소가 그대로 안전장치.
+- **사다리 max 24,576→32,768**: ON 템플릿 두 곳과 `CODEX_DEFAULT_BUDGETS`(체크아웃·운영 루트 동기). 최종 단계표: low 3072 / medium 4096 / high 8192 / xhigh 16384 / max 32768, 각 단계 답변 최소 확보분은 62,464→32,768로 전 단계 종전보다 확대. 전역 `reasoning_budget_tokens: 8192` 유지.
+- 반영: supervisor 재시작(`output-65k-ladder-20261101-1`, ready). 시작 로그에 `low=3072 … max=32768` 로드 확인. 생성 프로필에도 같은 값 확인.
+- 검증: `budget 32000` 요청에서 `thinking capped at … (budget 24576)` 규칙과 동일한 자동 축소 로그가 새 상한으로 동작 — 최종 확인된 로그는 `(budget 32768)` 캡 동작(생각 24,000에서 답 자리 확보). Codex 라벨(32000) 방식은 max 라벨로 처리되며, 어댑티브+`output_config.effort:max` 단독 요청은 그 턴에서 생각 미생성(로그 없음) — 이 경로까지의 예산 적용은 Desktop 화면에서 별도 확인 필요(미검증).
+- 검사: 사다리·프로필·설정 묶음 44개 통과, 템플릿 재적용 멱등. 시간 상한(생각만 최대 32,768 ≈ 약 340초)과 답변 최대 약 32,768은 요청당 상한이며 품질 이득은 미측정. 커밋 없음. 되돌리기는 설정 2곳(출력 env·사다리 max)을 원값으로 되돌리고 같은 재시작 경로.
+
 ## 다른 PC에서 동일 설정
 
 먼저 이 저장소의 ON/OFF 실행기로 Strata를 시작하고, OpenCodex에서 `strata`가 같은 서버와 모델을 가리키는지 확인한다. 그다음 설치된 관리 CLI를 사용한다.

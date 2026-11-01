@@ -35,7 +35,9 @@ Claude Code 기본 모델은 `strata/qwen3.8-flash-next-unsloth-ud-iq4_xs`입니
 
 ## Codex와 다른 클라이언트도 사용할 때
 
-Claude 설정을 마친 뒤 `setup-claude-opencodex.bat clients`(Linux/macOS: `./setup-claude-opencodex.sh clients`)로 Strata 모델 정보·Codex 지연 MCP·공통 지침을 연결합니다. `clients --check`는 저장된 설정 차이만 읽습니다. 모델 API 정보와 각 앱의 압축·권한·MCP는 적용 범위가 다릅니다. [공통 설정과 실제 확인 범위](STRATA_CLIENT_SETTINGS_20261028_KO.md)를 따르세요.
+Claude 설정을 마친 뒤 `setup-claude-opencodex.bat clients`(Linux/macOS: `./setup-claude-opencodex.sh clients`)로 Strata 모델 정보·Codex 지연 MCP·공통 지침을 연결합니다. `clients --check`는 저장된 설정 차이만 읽습니다. 실제로 우선 적용되는 Codex 압축 한도, MCP 제한 시간, 공통 실행·검증 지침의 누락·차이도 검사합니다. `codex_model_selection`은 저장된 기본 모델을 별도로 표시하며 다른 모델을 선택해 둔 경우 자동 변경하지 않습니다. 모델 API 정보와 각 앱의 압축·권한·MCP는 적용 범위가 다릅니다. [공통 설정과 실제 확인 범위](STRATA_CLIENT_SETTINGS_20261028_KO.md)를 따르세요.
+
+ChatGPT 데스크톱에서 이 연결로 코딩하는 경로는 Codex 모드입니다. 현재 대화에서 Strata 모델과 작업 폴더를 확인하고, 공통 지침을 갱신한 뒤에는 새 대화에서 적용 여부를 확인합니다. 일반 채팅이나 연결 준비만으로 파일 수정·검증·장시간 무인 작업이 보장되지는 않습니다. [자율 작업 점검](STRATA_CLIENT_SETTINGS_20261028_KO.md#2026-11-01-자율-작업-점검)은 확인된 실행 범위와 남은 제약을 구분합니다.
 
 GUI 화면 조작이 필요한 경우는 네 경로(터미널 CLI·Desktop Code·Codex CLI·ChatGPT/Codex Desktop) 모두 agent-tools로 얻는 CUA만 사용합니다. Codex·ChatGPT Desktop이 자체 제공하는 Computer Use는 쓰지 않도록 `~/.codex/config.toml`의 OpenAI 번들 computer-use 플러그인 두 개를 껐고, Codex 공통 지침(`~/.codex/AGENTS.md`, `strata_client_settings.py` 생성)에도 사용 금지 문장을 넣었습니다. 설정 변경은 새로 시작하는 실행부터 적용되므로 데스크톱 앱은 재실행이 필요합니다. 2026-11-01에 `codex exec`로 agent-tools 검색→호출이 `list_windows`(창 122개)까지 도달하는 것을 확인했습니다.
 
@@ -145,7 +147,7 @@ Claude Code CLI와 Claude Desktop Code는 `~/.claude/settings.json`, `~/.claude.
 
 현재는 Strata 공급자를 Anthropic 방식과 OpenCodex의 원본 Messages 옵션으로 연결합니다. 도구 검색 뒤 긴 입력의 캐시 손실을 줄인 결과는 [연결 지연 측정](CLAUDE_OPENCODEX_LATENCY_20261025_KO.md)에 있습니다. 검색·이미지·특정 정책 요청은 기존 변환 경로를 사용할 수 있으며, 모든 작업의 전체 시간이 빨라졌다고 보장하지 않습니다. 과거 직결 경로나 다른 캐시 조건의 성능 수치를 재사용하지 않습니다.
 
-현재 Desktop Code에서 쓰는 사용자 지정 Strata Qwen 모델은 ToolSearch가 실제로 노출되지 않는 것을 새 세션에서 확인했습니다. `ENABLE_TOOL_SEARCH=true`도 기능을 켜지 못했고, 이 모델에서는 전체 MCP 도구 정의가 미리 로드된다고 봐야 합니다. 이전 Claude 모델 시험의 검색 성공이나 캐시 개선을 현재 모델에 그대로 적용하지 마세요. 직접 CUA·REA 등록 시 약 98.5k/318개였던 값은 이전 관측입니다. 일반 프로젝트의 on-demand 사용자 MCP는 `agent-tools` 2개 도구이며, 유지보수 프로젝트에서만 `strata-maintenance` 9개 도구가 추가됩니다. Desktop 내장 도구 비용은 별도로 표시됩니다. 세션마다 `/context`로 실제 목록을 확인합니다. 자세한 최신 결과는 [2026-10-26 검증 기록](CLAUDE_DESKTOP_CODE_20261026_KO.md)을 참고하세요.
+이전 Desktop 프로필에서는 사용자 지정 Strata Qwen 모델에 ToolSearch가 노출되지 않았고 `ENABLE_TOOL_SEARCH=true`만으로 해결되지 않았습니다. 이후 프로필의 `toolSearchEnabled: true` 적용으로 경로를 보완했습니다. 2026-11-01 현재 세션에서는 내장 ToolSearch로 유지보수·CUA 도구 스키마를 불러오고 실제 읽기 전용 호출까지 확인했습니다. 따라서 이전 실패를 현재 모델의 고정된 제한으로 해석하지 않습니다. 이전 Claude 모델 시험의 검색 성공이나 캐시 개선을 현재 모델에 그대로 적용하지 마세요. 직접 CUA·REA 등록 시 약 98.5k/318개였던 값은 이전 관측입니다. 일반 프로젝트의 on-demand 사용자 MCP는 `agent-tools` 2개 도구이며, 유지보수 프로젝트에서만 `strata-maintenance` 9개 도구가 추가됩니다. Desktop 내장 도구 비용은 별도로 표시됩니다. 세션마다 `/context`로 실제 목록을 확인합니다. 자세한 최신 결과는 [2026-10-26 검증 기록](CLAUDE_DESKTOP_CODE_20261026_KO.md)을 참고하세요.
 
 설정 범위와 IDE 사용 방식: [Claude Desktop Code](https://code.claude.com/docs/en/desktop), [Claude Code 설정](https://code.claude.com/docs/en/settings), [MCP 연결](https://code.claude.com/docs/en/mcp).
 
@@ -163,6 +165,8 @@ Windows 실행기 `cmd.exe /d /c setup-claude-opencodex.bat clients --help`는 �
 소스 백업 영수증: `C:/Users/luiny/.claude/backups/strata-opencodex-20261028T144027431577Z/files.json`, `C:/Users/luiny/.claude/backups/strata-opencodex-20261028T144559678702Z/files.json`, `C:/Users/luiny/.claude/backups/strata-opencodex-20261028T144750235854Z/files.json`. 시험 홈 수정은 별도 백업을 남겼다. 실제 사용자 설정·공급자·실행 중 서비스·방화벽·SSH·VPN은 변경하지 않았다. 패키지/모델을 설치하거나 Linux GPU, 실제 Mac, 새로 설치한 PC, 외부 네트워크에서 실행한 결과가 아니다. SSH·Mac 권한 절차는 위 공식 원문을 확인해 안내에 반영했다. 코드 준비·오프라인 검사를 전체 환경의 실기 통과로 표시하지 않는다.
 
 ## 2026-11-01 클라이언트 중간 과정·완료 출력 점검
+
+**후속 수정:** thinking·도구 이벤트가 도착하더라도 일반 진행 설명은 `anthropic_response_guard=true`가 제거하고 있었다. 중간 보고 복원 요청으로 ON의 필터를 false로 바꾸고 기존 supervisor 재시작 뒤 실제 Messages·Responses에서 도구 전 본문과 여러 조각의 최종 본문을 확인했다. 보고 지침도 두 클라이언트에 반영했다. [본문 복원 기록](CLAUDE_RESPONSE_DELIVERY_20261027_KO.md#2026-11-01-진행-본문-복원)을 우선한다. 앱의 Normal 보기에서도 진행 본문은 표시되며, 모든 도구 세부사항을 펼치는 Verbose 보기와는 별개다. 모델이 생성하지 않은 보고를 게이트웨이가 임의로 만들어 내지는 않는다.
 
 네 클라이언트 경로에서 공식 모델과 같이 중간 과정(생각·도구)이 흐르고 최종 결과가 완료 신호까지 출력되는지 확인했다. 게이트웨이 원시 SSE에서 Anthropic Messages 경로는 `thinking_delta`·`text_delta`·`input_json_delta`와 `message_stop`을, Codex가 쓰는 Responses 경로는 reasoning 요약 델타·`output_text.delta`·`function_call` 델타와 `response.completed`를 반환했다. 터미널 Claude CLI는 사용자 셸에서 생각 이벤트와 도구 왕복 뒤 전문과 `end_turn`을 받고 종료 0으로 끝났고, Codex CLI는 `codex exec`에서 요약 줄과 셸 도구 실행·최종 답변·토큰 수까지 출력했다. Codex Desktop(ChatGPT 앱)은 세션 로그에 Strata 모델을 reasoning 기록과 함께 실행한 스레드가 남아 있고 화면 단계 표시 설정도 켜져 있었으나, 앱 창이 없어 실제 화면 확인은 하지 못했다. Desktop Code는 이 대화와 최근 12건의 200 응답이 같은 경로의 증거다.
 

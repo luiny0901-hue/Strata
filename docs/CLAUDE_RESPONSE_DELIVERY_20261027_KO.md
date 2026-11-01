@@ -1,5 +1,7 @@
 # Claude Messages 응답 전달 보완 — 2026-10-27
 
+> **2026-11-01 변경**: 중간 진행 보고를 복원하기 위해 ON의 `anthropic_response_guard`를 false로 전환한다. 아래 2026-10-27 필터 적용 결과는 과거 이력이다. 도구 동반 본문 제거와 일반 본문 보류뿐 아니라 이 필터의 자연어 JSON-only 추출도 비활성화된다. 별도 명시적 JSON Schema 검증은 변경하지 않는다. 최신 적용·검증 상태는 문서 마지막 절을 따른다.
+
 > 추가 검증: 같은 날 `jsonschema 4.26.0` 설치 후 이전 생략 2개를 포함한 44개 검사가 모두 통과했다. 아래의 42개 통과·2개 생략은 설치 전 이력이다.
 
 남아 있던 **도구 결과 전 완료 문장**과 **JSON 밖 부연 설명**을 출력 전달 코드에서 보완하고 현재 PC의 ON 서버에 적용했다. 기존 실패 응답을 그대로 재생한 검사와 실제 OpenCodex → Strata 도구 왕복을 모두 확인했다. 모델의 모든 판단 오류가 해결됐다는 의미는 아니다.
@@ -88,3 +90,30 @@
 현재 운영 서버의 기존 구조화 출력 API도 직접 확인했다. 잘못된 스키마는 생성 횟수를 늘리지 않고 400으로 거부했고, 정상 스키마의 `{"answer":4}`는 200으로 통과했다. 유효한 JSON이지만 스키마를 충족할 수 없는 출력은 `structured_output_failed` 502로 차단됐다. 두 생성 시험은 각각 정확히 한 번 실행됐으며 종료 후 서버는 유휴였다. 실행 중 서버가 새 라이브러리를 바로 읽어 재시작은 필요하지 않았다.
 
 이는 JSON Schema를 명시한 기존 구조화 출력 요청의 검증이며 Claude의 모든 답변에 스키마를 자동 강제한 변경은 아니다. 설치 전 생략·기존 실패 기록은 그대로 보존했다. 새 기록은 `C:\Users\luiny\Strata-data\diagnostics\jsonschema-validation-20261027`의 `summary.json`, `cpu-suite.log`, `runtime-schema-probe.json`, `runtime-generations.json`, 패키지 변경·의존성 검사 로그에 있다.
+
+## 2026-11-01 진행 본문 복원
+
+사용자 요청은 네 클라이언트에서 중간 진행 설명·도구 과정·완료 보고를 작업 도중 볼 수 있도록 하는 것이다. Opus·Mythos의 답변 내용이나 앱별 화면을 동일하게 복제한다는 보장은 하지 않는다. 공식 Desktop 문서는 Normal에서도 전체 답변 본문과 접힌 도구 요약을 표시하며, Verbose는 세부 도구 과정 표시라고 설명한다. 현재 대화는 Normal이었으며 표시 설정을 변경하지 않았다.
+
+변경 전 실제 게이트웨이의 Messages·Responses에 같은 무부작용 ping 요청을 보냈다. 두 경로 모두 도구 호출 전 본문이 없고, 가상 pong 결과 뒤 최종 본문만 도착했다. 원시 이벤트 영수증: [.strata-mcp/progress-stream-before.json](../.strata-mcp/progress-stream-before.json). 이는 화면 자체 검사가 아니라 API 전달 검사다. 필터 코드와 CPU 재현은 도구 동반 본문이 제거됨을 별도로 증명한다.
+
+저장 완료: 이 체크아웃의 `profiles/strata-unsloth-ud-iq4_xs-nvfp4fork-uncensored-on.json.template`, 운영 루트 `C:/Users/luiny/Strata/profiles/strata-unsloth-ud-iq4_xs-nvfp4fork-uncensored-on.json.template`, 현재 생성 프로필 `C:/Users/luiny/AppData/Local/Strata/profiles/strata-unsloth-ud-iq4_xs-nvfp4fork-uncensored-on-1m.json`의 `anthropic_response_guard=false`. 운영 파일의 나머지 JSON 값은 보존했다. ON의 262K·1M 모두 다음 실행 때 중간 본문을 보존하고 OFF는 기존대로다. 엔진·모델·출력 한도·추론·보안·권한·기존 필터 구현은 변경하지 않았다.
+
+진행 지침 정본 `examples/claude/KOREAN_INSTRUCTIONS.md`에는 첫 도구 전 안내와 중요한 결과 뒤 사실·다음 행동을 일반 답변 본문으로 전달하도록 명시했다. Codex 생성기는 해당 보고 절을 직접 포함한다. 실제 사용자 Claude 지침은 해당 한 항목만 병합했고 Codex 지침은 소유 생성기로 갱신했다. 백업: `~/.claude/backups/strata-opencodex-20261101T063700537012Z`, `~/.codex/backups/strata-opencodex-20261101T063700602210Z`. 재적용은 변경 0개였다.
+
+검사: 변경 전 프로필 검사 1개 실패로 차단 설정을 재현했다. 변경 뒤 `py -B -X utf8 -m unittest serve.test_anthropic_response_guard serve.test_anthropic_response_guard_http tools.test_strata_iq4xs_profiles tools.test_claude_code_guidance tools.test_strata_client_settings -q` 76개 통과·생략 없음. 스트림을 끝까지 소비하기 전에 진행 본문이 도착하는 생성기 검사와 HTTP 이벤트 순서 검사를 포함한다. 기존 opt-in 필터 동작과 JSON 검사도 보존했다.
+
+반영 결과: 기존 supervisor에 operation_id `progress-stream-20261101-1`로 Strata 재시작을 한 번 요청해 `ready`를 받았다. OpenCodex·Desktop은 재시작하지 않았다. 같은 `.strata-mcp/progress-stream-probe.py after`의 실제 Strata 모델 지정 요청에서 아래 결과를 확인했다. [변경 후 영수증](../.strata-mcp/progress-stream-after.json).
+
+| 경로 | 변경 전 도구 동반 본문 | 변경 후 첫 본문 / 도구 시작 | 최종 본문 |
+| --- | --- | --- | --- |
+| Messages | 없음 | 1.272초 / 1.468초 | text_delta 5개, message_stop |
+| Responses | 없음 | 1.511초 / 1.628초 | output_text.delta 5개, response.completed |
+
+변경 후 두 경로 모두 `진행 상황을 확인하겠습니다.`가 도구 호출 전에 도착하고, 가상 pong 결과 뒤 `확인을 완료했습니다.`로 끝났다. 실제 파일·GUI 부작용이 없는 도구 왕복이다. 시간은 한 번의 관측으로 성능 개선율이나 모든 작업의 표시 지연 보장이 아니다. 필터 해제는 다음 모델 요청부터 적용되지만 새 지침은 새 클라이언트 세션에서 읽는다.
+
+CUA로 현재 Claude Desktop의 Normal 화면에서 여러 중간 설명·접힌 도구 요약·진행 중 체크리스트를 확인했다. 접근성 트리는 3개 요소밖에 반환하지 않아 화면 캡처로 확인했다. 그 화면의 선택 모델은 `GPT 6 Astra (native)`였으므로 이것을 Strata 선택 대화의 화면 검증으로 오인하지 않는다. Strata는 위의 명시적 모델 지정 API 및 별도 CLI 시험으로 구분한다. 실제 Opus·Mythos와의 나란한 비교, 새 ChatGPT Desktop 대화의 표시 동일성, 모든 장시간 작업은 미검증이다.
+
+추가 실제 CLI 검사: Strata 모델을 명시한 새 Claude CLI와 Codex CLI에서 각각 일반 진행 본문 → 읽기 도구 → 최종 본문 → 정상 종료 순서를 확인했다. 두 실행 모두 종료 0, `progress_before_tool=true`였다. [Claude 영수증](../.strata-mcp/progress-claude-summary.json), [Codex 영수증](../.strata-mcp/progress-codex-summary.json). 여기서 통과한 것은 전달 순서다. Claude 최종 문장은 요청에 없던 ‘비어 있음’을 기대 조건으로 해석했고, Codex는 셸 읽기 결과의 한국어 인코딩이 깨진 상태에서 원문과 다른 문자열을 인용했다. Codex의 첫 재확인 명령은 구문 오류로 종료 1, 수정한 읽기 명령은 두 본문이 비어 있지 않다는 불리언 결과를 반환했다. 원문은 부모의 UTF-8 읽기 및 API 영수증으로 확인했다. 이 모델의 의미 해석·문구 정확성·셸 출력 인코딩 문제까지 해결한 것으로 표시하지 않는다.
+
+운영 템플릿과 생성 프로필은 재시작 뒤에도 필터 외의 모든 JSON 값이 백업과 같음을 확인했다. 필터를 다시 켜려면 두 파일의 해당 값만 true로 복원하고 기존 supervisor로 반영한다. 정상 중간 설명이 다시 숨겨지는 절충을 유의한다. 커밋·푸시는 하지 않았다.
