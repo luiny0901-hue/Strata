@@ -167,6 +167,19 @@ class ProfessionalGuidanceTests(unittest.TestCase):
         self.assertIn('글자 수 범위로 요청받은 단편은 본문 문단을 서너 개 이상으로 펼쳐 쓴다', guide)
         self.assertIn("말투 지시는 서술에 ‘존댓말’·‘반말’이라는 이름으로 옮기지 않고 실제 대화로 보여준다", guide)
 
+    def test_fanfic_spellings_and_translation_trace_check(self):
+        from tools.strata_client_settings import _codex_guide
+        reminder = policy.language_reminder()
+        self.assertIn('이중 피동·가주어·‘것’ 사슬 번역투를 확인하고', reminder)
+        self.assertIn('기존 게임·원작 2차창작은 원작의 공식 한국어·관용 표기를 원고 전체에서 통일하고', reminder)
+        self.assertIn('herself·selfly류 대명 잔류 포함', reminder)
+        self.assertIn(reminder, _codex_guide())
+        guide = policy.guidance()
+        self.assertIn('이중 피동·가주어·‘하게 하다’ 사슬·명사화 ‘것’ 사슬 같은 번역투 어순 흔적', guide)
+        self.assertIn('기존 게임·원작의 세계관이나 인물로 단편을 쓰면 원작의 공식 한국어 표기와 커뮤니티 관용 표기를 따르고', guide)
+        self.assertIn('표시 문구와 창작 원고 최종본에 의미 없는 외국어 조각', guide)
+        self.assertIn('서술체에 보고용 존댓말을 강제하지 않으며', guide)
+
     def test_ui_strings_follow_screen_word_conventions(self):
         from tools.strata_client_settings import _codex_guide
         reminder = policy.language_reminder()
