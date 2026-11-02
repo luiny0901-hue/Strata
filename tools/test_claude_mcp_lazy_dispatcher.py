@@ -127,6 +127,21 @@ class LazyMcpDispatcherTests(unittest.TestCase):
         self.assertTrue(unavailable["result"]["isError"])
         self.assertIn("EXA_API_KEY", unavailable["result"]["content"][0]["text"])
 
+    def test_search_priority_is_advertised_only_when_mcp_search_is_available(self):
+        request = {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {}}
+        unavailable = self.dispatcher.handle(request)['result']['instructions']
+        self.assertNotIn('먼저 직접 호출', unavailable)
+        dispatcher = lazy.Dispatcher({}, searxng_url='http://127.0.0.1:8888')
+        self.addCleanup(dispatcher.close)
+        instructions = dispatcher.handle(request)['result']['instructions']
+        for contract in ('web_search', '내장 WebSearch', '먼저 직접 호출',
+                         'search_tools·call_tool은 CUA·REA 전용',
+                         'count', '부재·비활성화 또는 실제 실패'):
+            self.assertIn(contract, instructions)
+        description = dispatcher.tool_definitions()[-1]['description']
+        self.assertIn('이 MCP 도구를 먼저 직접 호출', description)
+        self.assertIn('결과 수는 count', description)
+
     def test_exa_search_tool_is_opt_in_and_returns_results(self):
         dispatcher = lazy.Dispatcher({"cua-driver": self.cua, "rea": self.rea}, exa_api_key="test-key")
         self.addCleanup(dispatcher.close)
@@ -158,6 +173,32 @@ class LazyMcpDispatcherTests(unittest.TestCase):
             "params": {"name": "web_search", "arguments": {"query": "official Python", "api_key": "leak"}}})
         self.assertTrue(response["result"]["isError"])
         self.assertNotIn("leak", json.dumps(response))
+
+    def test_web_search_schema_error_explains_direct_recovery_without_echoing_input(self):
+        response = self.call('web_search', {'query': 'private-query-marker', 'max_results': 3})
+        result = response['result']
+        self.assertTrue(result['isError'])
+        text = result['content'][0]['text']
+        self.assertIn('count', text)
+        self.assertIn('max_results', text)
+        self.assertIn('직접 호출', text)
+        self.assertNotIn('private-query-marker', json.dumps(response))
+        self.assertIsNone(self.cua.process)
+        self.assertIsNone(self.rea.process)
+
+    def test_wrong_dispatch_path_points_to_direct_web_search_without_starting_children(self):
+        for name, arguments in (
+                ('search_tools', {'query': 'private-query-marker'}),
+                ('call_tool', {'server': 'agent-tools', 'tool': 'web_search', 'args': {}})):
+            with self.subTest(name=name):
+                response = self.call(name, arguments)
+                self.assertTrue(response['result']['isError'])
+                text = response['result']['content'][0]['text']
+                self.assertIn('web_search', text)
+                self.assertIn('직접 호출', text)
+                self.assertNotIn('private-query-marker', json.dumps(response))
+        self.assertIsNone(self.cua.process)
+        self.assertIsNone(self.rea.process)
 
     def test_search_starts_only_selected_server_and_returns_input_schema(self):
         response = self.call("search_tools", {"server": "cua-driver", "query": "window", "limit": 1})

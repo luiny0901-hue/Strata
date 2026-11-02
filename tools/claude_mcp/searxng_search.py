@@ -26,6 +26,10 @@ ALLOWED_LANGUAGES = ("auto", "en", "en-US", "ko", "ko-KR")
 class SearXNGSearchError(RuntimeError):
     """Safe user-facing local search errors."""
 
+    def __init__(self, message: str, *, cooldown_seconds: int = 0):
+        super().__init__(message)
+        self.cooldown_seconds = cooldown_seconds
+
 
 class _NoRedirectHandler(HTTPRedirectHandler):
     def redirect_request(self, _request, _fp, _code, _message, _headers, _new_url):
@@ -88,6 +92,15 @@ def _domain_filters(value: object) -> list[str]:
     return cleaned
 
 
+def _matches_domain(url: str, domain: str) -> bool:
+    parsed = urlsplit(url)
+    host, _, path = domain.removeprefix('*.').partition('/')
+    actual_host = (parsed.hostname or '').lower()
+    return (actual_host == host or actual_host.endswith('.'+host)) and (
+        not path or parsed.path == '/'+path.rstrip('/')
+        or parsed.path.startswith('/'+path.rstrip('/')+'/'))
+
+
 def search(
     query: object,
     count: object,
@@ -123,7 +136,8 @@ def search(
 
     scoped_query = query
     if domains:
-        scoped_query += " " + " ".join(f"site:{domain}" for domain in domains)
+        sites = " OR ".join(f"site:{domain}" for domain in domains)
+        scoped_query += " " + (f"({sites})" if len(domains) > 1 else sites)
     params = {"q": scoped_query, "format": "json", "language": language, "safesearch": "1"}
     if category:
         params["categories"] = category
@@ -143,9 +157,9 @@ def search(
         if status == 403:
             raise SearXNGSearchError("Local SearXNG refused JSON; enable json under search.formats and restart it.") from None
         if status == 429:
-            raise SearXNGSearchError("SearXNG rate-limited this request; no retry was made.") from None
+            raise SearXNGSearchError("SearXNG rate-limited this request; no retry was made.", cooldown_seconds=60) from None
         if status >= 500:
-            raise SearXNGSearchError("SearXNG or its upstream engines are temporarily unavailable; no retry was made.") from None
+            raise SearXNGSearchError("SearXNG or its upstream engines are temporarily unavailable; no retry was made.", cooldown_seconds=30) from None
         raise SearXNGSearchError(f"Local SearXNG rejected the request (HTTP {status}).") from None
     except (URLError, TimeoutError, OSError):
         raise SearXNGSearchError(
@@ -169,6 +183,8 @@ def search(
         title = _clean_text(row.get("title"), MAX_TITLE_CHARS)
         url = _safe_url(row.get("url"))
         if not title or not url:
+            continue
+        if domains and not any(_matches_domain(url, domain) for domain in domains):
             continue
         item = {"title": title, "url": url}
         content = _clean_text(row.get("content"), MAX_CONTENT_CHARS)
@@ -199,4 +215,11 @@ def search(
         ]
     if cancel_event is not None and cancel_event.is_set():
         raise SearXNGSearchError("search was cancelled after dispatch; verify before retrying")
+    if not rows and any(len(row) == 2 and row[1] for row in output.get("unresponsive_engines", [])):
+        raise SearXNGSearchError(
+            "검색 결과가 없고 검색엔진 오류·요청 제한이 보고되어 검색을 완료하지 못했습니다. "
+            "같은 작업에서 검색어만 바꿔 반복 호출하지 마세요. 알려진 공식 URL이 있으면 원문을 직접 확인하고, "
+            "없으면 검색 미완료로 보고하세요. 비호환이 확인된 내장 검색으로 우회하지 마세요.",
+            cooldown_seconds=60,
+        )
     return output

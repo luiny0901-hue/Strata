@@ -476,8 +476,13 @@ class Dispatcher:
                 "serverInfo": {"name": "strata-agent-tools", "version": "1.0.0"},
                 "instructions": (
                     "Use CUA only for requested GUI observation or interaction, and REA only for reverse engineering "
-                    "existing built applications. For current public information, use web_search when available; "
-                    "never include private code, logs, credentials, or personal data in search queries. "
+                    "existing built applications. "
+                    + ("웹검색이 필요하면 이 MCP의 web_search를 내장 WebSearch·web.run·search_service_web_run, "
+                       "브라우저·셸 검색보다 먼저 직접 호출하세요. search_tools·call_tool은 CUA·REA 전용입니다. "
+                       "결과 수는 count 인자를 사용하세요. 인자 오류는 제공된 스키마에 맞게 수정하고, "
+                       "MCP 검색의 부재·비활성화 또는 실제 실패가 확인된 경우에만 이유를 밝히고 다른 검색 경로를 사용하세요. "
+                       if self.search_router.available else "")
+                    + "never include private code, logs, credentials, or personal data in search queries. "
                     "First search the selected CUA/REA catalog narrowly and call only a returned tool with its exact schema."
                 ),
             })
@@ -496,7 +501,12 @@ class Dispatcher:
                 if name == "search_tools":
                     selected = args.get("server")
                     if selected not in self.servers:
-                        raise DispatcherError("select one configured server: cua-driver or rea")
+                        raise DispatcherError(
+                            'search_tools는 server="cua-driver" 또는 server="rea"의 하위 도구 검색 전용입니다. '
+                            '웹검색은 별도 MCP web_search를 직접 호출하세요. '
+                            '예: {"query":"공개 문서 검색어","count":3}. '
+                            '웹 페이지 읽기 도구를 이 하위 카탈로그에서 찾지 마세요.'
+                        )
                     hits = search_catalog(self.servers[selected], args.get("query"), args.get("limit", 5), cancel_event)
                     return self.response(rid, {"content": [{"type": "text", "text": json.dumps(
                         {"server": selected, "count": len(hits), "tools": hits}, ensure_ascii=False,
@@ -505,7 +515,11 @@ class Dispatcher:
                     selected, tool_name = args.get("server"), args.get("name")
                     tool_args = args.get("arguments")
                     if selected not in self.servers or not isinstance(tool_name, str) or not isinstance(tool_args, dict):
-                        raise DispatcherError("server, discovered tool name, and object arguments are required")
+                        raise DispatcherError(
+                            'call_tool에는 server, 검색으로 확인한 name, 객체 arguments가 필요합니다. '
+                            'server는 cua-driver 또는 rea입니다. 웹검색은 이 도구를 거치지 않고 '
+                            '별도 MCP web_search를 query·count 인자로 직접 호출하세요.'
+                        )
                     return self.response(rid, self.servers[selected].call(tool_name, tool_args, cancel_event))
                 if name == "web_search":
                     result = self.search_router.search(args, cancel_event)

@@ -19,6 +19,8 @@ class WebSearchError(RuntimeError):
 WEB_SEARCH_TOOL_DEF = {
     "name": "web_search",
     "description": (
+        "웹검색 시 내장 검색·브라우저·셸 검색보다 이 MCP 도구를 먼저 직접 호출하세요. "
+        "search_tools·call_tool을 거치지 않으며 결과 수는 count로 지정합니다. "
         "Check a short process-memory cache for identical recent requests, then search indexed official "
         "software/AI/game documentation locally when it clearly matches. Otherwise search the public web through Exa first, "
         "Tavily free/basic as backup, then this PC's local SearXNG when API allowance or provider rate limits are reached. "
@@ -71,7 +73,12 @@ def _validate(args: object) -> dict:
     if not isinstance(args, dict):
         raise WebSearchError("web_search arguments must be an object")
     if set(args) - {"query", "count", "mode", "category", "include_domains", "time_range", "language", "published_after"}:
-        raise WebSearchError("web_search received unsupported arguments")
+        raise WebSearchError(
+            'web_search에 지원하지 않는 인자가 있습니다. 결과 수는 count(1~10)를 사용하고 '
+            'max_results는 사용하지 마세요. 허용 인자: query, count, mode, category, '
+            'include_domains, time_range, language, published_after. '
+            '이 MCP의 web_search를 직접 호출하며 search_tools·call_tool을 거치지 마세요.'
+        )
     query = args.get("query")
     if not isinstance(query, str) or not 2 <= len(query.strip()) <= exa_search.MAX_QUERY_CHARS:
         raise WebSearchError(f"query must contain 2 to {exa_search.MAX_QUERY_CHARS} characters")
@@ -255,8 +262,9 @@ class WebSearchRouter:
             try:
                 ledger.reserve_searxng(cancel_event=cancel_event)
                 category = args["category"]
+                # SearXNG의 it 분류는 공식 문서보다 코드·질의응답 전용 엔진을 선택한다.
                 local_category = ("science" if category in ("science", "publication") else
-                                  "news" if category == "news" else "it" if category == "it" else "general")
+                                  "news" if category == "news" else "general")
                 result = searxng_search.search(
                     args["query"], args["count"], self.searxng_url,
                     category=local_category, include_domains=args["domains"],
@@ -270,7 +278,11 @@ class WebSearchRouter:
                 if args["time_range"] == "week":
                     result["note"] += " The weekly time window is not applied by the local fallback."
                 return result
-            except (searxng_search.SearXNGSearchError, UsageLedgerError) as exc:
+            except searxng_search.SearXNGSearchError as exc:
+                if exc.cooldown_seconds:
+                    ledger.set_cooldown("searxng", exc.cooldown_seconds, "search_engine_unavailable")
+                raise WebSearchError(str(exc)) from None
+            except UsageLedgerError as exc:
                 raise WebSearchError(str(exc)) from None
 
         if not fallbacks:

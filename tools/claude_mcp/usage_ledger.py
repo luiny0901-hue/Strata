@@ -165,6 +165,14 @@ class UsageLedger:
             try:
                 with self._connection() as connection:
                     connection.execute("BEGIN IMMEDIATE")
+                    cooldown = connection.execute(
+                        "SELECT until_epoch FROM provider_cooldowns WHERE provider='searxng'"
+                    ).fetchone()
+                    if cooldown and cooldown[0] > moment:
+                        raise UsageLedgerError(
+                            f"검색엔진 장애로 로컬 검색을 {max(1, int(cooldown[0] - moment))}초 동안 쉬고 있습니다. "
+                            "검색어를 바꿔도 요청을 다시 보내지 않았습니다."
+                        )
                     connection.execute(
                         "DELETE FROM searxng_requests WHERE occurred_epoch < ?",
                         (moment - self.SEARX_MIN_INTERVAL_SECONDS,),
