@@ -71,6 +71,33 @@ class ProfessionalGuidanceTests(unittest.TestCase):
         self.assertNotIn('mcp__ccd_turn__wrap_up', _codex_guide())
         self.assertNotIn('mcp__ccd_turn__update_plan', _codex_guide())
 
+    def test_current_evidence_policy_is_shared_with_codex(self):
+        from tools.strata_client_settings import _codex_guide
+        evidence = policy.evidence_policy()
+        for guide in (policy.guidance(), _codex_guide()):
+            self.assertEqual(guide.count(evidence), 1)
+            for contract in ('모델의 출시일·학습 기준일', 'category="publication"',
+                             'agent-tools.web_search', '내장 `WebSearch`·`web.run`의 공급자 지원을 추정하지 않는다',
+                             '같은 경로를 병렬 재호출하지 않는다', '공식 API의 `published_at`', '시간대를 확인한다', 'README·LICENSE의 복수 선택 조건',
+                             'github.com', 'huggingface.co', '라이선스·유지 상태',
+                             '최신 확인은 미완료', '안정적인 기본 문법', '원문 조회가 실패하면'):
+                self.assertIn(contract, guide)
+        self.assertNotIn('`rea_analysis`', _codex_guide())
+        self.assertNotIn('GUI·역분석·웹 검색이 필요할 때만', _codex_guide())
+        self.assertIn('웹 검색은 CUA·REA 하위 검색이 아니라 별도 MCP', _codex_guide())
+        self.assertIn('이 환경은 구독 없이 사용하는 것을 전제로 하므로', _codex_guide())
+        self.assertIn('요금제에 의존하는 hosted 내장 검색을 웹검색 기본이나', _codex_guide())
+        self.assertIn('다른 경로는 허용된 공식 HTTP 조회뿐이고', _codex_guide())
+        self.assertNotIn('cannot be replayed losslessly', _codex_guide())
+        self.assertIn('검색어만 바꿔 같은 경로를 반복 호출하지 않으며', evidence)
+        for contract in ('내장 `WebSearch`·`web.run`·`search_service_web_run`',
+                         '현재 클라이언트가 제공한 목록', '이미 제공된 경우에는 직접 호출',
+                         'MCP 검색의 부재·비활성화 또는 실제 호출 실패',
+                         '구독 없이 사용하는 것을 전제로 하므로',
+                         '클라이언트 내장·hosted 검색은 기본이나 대체 경로로 선택하지 않고',
+                         '검색 결과 0개를 도구 부재로 판단하지 않는다'):
+            self.assertIn(contract, evidence)
+
     def test_progress_stays_korean_after_handling_english_material(self):
         from tools.strata_client_settings import _codex_guide
         reminder = policy.language_reminder()
@@ -198,11 +225,37 @@ class ProfessionalGuidanceTests(unittest.TestCase):
                 '같은 입력·기기·빌드 구성·정밀도·동시 부하',
                 '정확성 및 필요한 성능 지표를 함께 비교',
                 '전송·복사·동기화·메모리 비용까지 포함',
+                '할당기·객체 재사용 상태와 측정 도구의 추적 범위',
+                '프로세스 전체 메모리나 작업의 절대 요구량으로 일반화하지 않는다',
                 '정확도·보안·호환성·필수 기능을 몰래 낮춰',
                 '성능과 무관한 작은 수정에 별도 벤치마크를 강제하지 않는다']:
             self.assertIn(contract, scope)
         for guide in (policy.guidance(), _codex_guide()):
             self.assertEqual(guide.count(scope), 1)
+
+    def test_coding_boundaries_reach_codex_without_optional_document_read(self):
+        from tools.strata_client_settings import _codex_guide
+        coding = policy.coding_policy()
+        codex = _codex_guide()
+        self.assertEqual(codex.count(coding), 1)
+        for line in coding.splitlines()[2:]:
+            self.assertEqual(policy.guidance().count(line), 1)
+        for contract in ('응집된 함수·모듈', '기존 소유 모듈',
+                         '같은 기능의 두 번째 구현', '순환 의존성을 피하며',
+                         '작은 수정에 새 계층·문서·전체 재포맷을 추가하지 않는다'):
+            self.assertIn(contract, coding)
+
+    def test_coding_policy_rejects_missing_or_duplicate_source_rule(self):
+        root = Path(self.temp.name)/'coding-source'
+        source = root/'examples/claude/STRATA_SESSION_RECOVERY_KO.md'
+        source.parent.mkdir(parents=True)
+        original = (policy.ROOT/'examples/claude/STRATA_SESSION_RECOVERY_KO.md').read_text(encoding='utf-8')
+        rule = next(line for line in original.splitlines() if line.startswith('- 기존 설계 정본·호출부·테스트로'))
+        for replacement in ('', rule+'\n'+rule):
+            with self.subTest(duplicate=bool(replacement)):
+                source.write_text(original.replace(rule, replacement), encoding='utf-8')
+                with self.assertRaisesRegex(ValueError, '코드 구조 지침'):
+                    policy.coding_policy(root)
 
     def test_progress_reports_reach_both_clients_without_requiring_thinking_display(self):
         from tools.strata_client_settings import _codex_guide

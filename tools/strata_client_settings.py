@@ -20,11 +20,11 @@ except ImportError:  # Do not break the existing Python 3.10 Claude-only doctor.
 
 if __package__:
     from . import claude_opencodex_client as shared
-    from .claude_code_guidance import language_reminder, validation_policy, scope_policy, progress_policy, CUA_INPUT_POLICY, CLIENT_EXECUTION, SHARED_PLANNING
+    from .claude_code_guidance import language_reminder, validation_policy, scope_policy, coding_policy, progress_policy, evidence_policy, CUA_INPUT_POLICY, CLIENT_EXECUTION, SHARED_PLANNING
     from .strata_anthropic_effort import EFFORT_LEVELS
 else:
     import claude_opencodex_client as shared
-    from claude_code_guidance import language_reminder, validation_policy, scope_policy, progress_policy, CUA_INPUT_POLICY, CLIENT_EXECUTION, SHARED_PLANNING
+    from claude_code_guidance import language_reminder, validation_policy, scope_policy, coding_policy, progress_policy, evidence_policy, CUA_INPUT_POLICY, CLIENT_EXECUTION, SHARED_PLANNING
     from strata_anthropic_effort import EFFORT_LEVELS
 
 MODEL_FIELDS = ('modelContextWindows', 'modelMaxOutputTokens',
@@ -412,9 +412,12 @@ def _codex_guide():
         '현재 상태·변경·검증 및 장기 개발·유지보수 기준을 읽는다. 상세 엔진/데스크톱 지침은 '
         f'`{(root/"examples/claude/game-engines").as_posix()}` 또는 '
         f'`{(root/"examples/claude/professional").as_posix()}`에서 해당 대상 하나만 읽는다.\n\n'
-        +scope_policy(root)+'\n\n'+validation_policy(root)+'\n\n'+progress_policy(root)+'\n\n'+
+        +scope_policy(root)+'\n\n'+coding_policy(root)+'\n\n'+evidence_policy(root)+'\n\n'+validation_policy(root)+'\n\n'+progress_policy(root)+'\n\n'+
         '## 실행·검증·완료\n\n'+CLIENT_EXECUTION+'\n- '+SHARED_PLANNING+'\n\n'+
-        'GUI·역분석·웹 검색이 필요할 때만 agent-tools의 검색으로 필요한 하위 도구를 찾고 반환된 정확한 이름·스키마로 호출한다. '
+        'GUI·역분석이 필요할 때만 agent-tools.search_tools로 필요한 하위 도구를 찾고 반환된 정확한 이름·스키마로 호출한다. '
+        '웹 검색은 CUA·REA 하위 검색이 아니라 별도 MCP agent-tools.web_search를 사용한다. '
+        '이 환경은 구독 없이 사용하는 것을 전제로 하므로, 요금제에 의존하는 hosted 내장 검색을 웹검색 기본이나 '
+        'MCP 실패 후 대체 경로로 선택하지 않는다. MCP 실패 시 다른 경로는 허용된 공식 HTTP 조회뿐이고, 없으면 미확인으로 남긴다. '
         'GUI 화면 조작은 항상 agent-tools를 통해 얻는 CUA로 수행하고 클라이언트가 내장한 Computer Use 도구는 사용하지 않는다. '
         +CUA_INPUT_POLICY+' '+
         'MCP 등록은 도구 실행 성공이나 승인·현재 세션 연결을 증명하지 않는다.\n'+GUIDE_END+'\n')

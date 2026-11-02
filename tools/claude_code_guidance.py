@@ -64,10 +64,29 @@ def scope_policy(root=ROOT):
     return shared_sections(basic, {'구현 범위'})
 
 
+def coding_policy(root=ROOT):
+    recovery = (root/'examples/claude/STRATA_SESSION_RECOVERY_KO.md').read_text(encoding='utf-8')
+    current = shared_sections(recovery, {'현재 상태·변경·검증'})
+    prefixes = ('- 코드의 작성·수정 기준은', '- 동작·상태의 정본은',
+                '- 기존 설계 정본·호출부·테스트로', '- 서로 다른 정책·필요한 플랫폼 어댑터를')
+    rules = []
+    for prefix in prefixes:
+        matches = [line for line in current.splitlines() if line.startswith(prefix)]
+        if len(matches) != 1:
+            raise ValueError('코드 구조 지침의 필수 항목이 없거나 중복되었습니다: '+prefix)
+        rules.append(matches[0])
+    return '## 코드 구조·소유 경계\n\n'+'\n'.join(rules)
+
+
 def progress_policy(root=ROOT):
     basic = (root/'examples/claude/KOREAN_INSTRUCTIONS.md').read_text(encoding='utf-8')
     return shared_sections(basic, {'진행·최종 보고'}).replace(
         '실행 종료 기준은 복구 지침을 따르며', '실행 종료 기준은 현재 클라이언트의 실행·검증·완료 지침을 따르며')
+
+
+def evidence_policy(root=ROOT):
+    basic = (root/'examples/claude/KOREAN_INSTRUCTIONS.md').read_text(encoding='utf-8')
+    return shared_sections(basic, {'근거·도구'}).split('\n- 엔진·전문 도구의 바이너리/', 1)[0]
 
 
 def validation_policy(root=ROOT):
