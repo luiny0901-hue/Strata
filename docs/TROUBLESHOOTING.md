@@ -24,6 +24,16 @@ Strata is already running. Look for its window. Or another program uses the port
 Only an address that is really taken says "already in use". Any other reason (Windows keeps the port reserved, or
 the config's `"host"` is not an address of this PC) is printed as what the OS said, with what to change (#769).
 
+**A start fails with "cannot listen" on a free port, or with WinError 10013, and a PC restart fixes it.**
+Windows refused the port: it keeps a port for itself, or a firewall rule forbids it. The reserved ranges are redrawn
+at every start-up, and they are taken from the dynamic port range (the Windows default starts at 49152; `netsh int
+ipv4 show dynamicport tcp` shows this PC's, and a low start lets a reservation land on an ordinary port) - so the
+same port can work after one start-up and fail after another. The ranges in place now: `netsh int ipv4 show
+excludedportrange protocol=tcp`. To keep the ports for Strata, in an elevated window while they are free:
+`netsh int ipv4 add excludedportrange protocol=tcp startport=8080 numberofports=1` (the same for the local control
+port 8768). Moving the dynamic range back to the default - `netsh int ipv4 set dynamicport tcp start=49152
+num=16384`, applied at the next start-up - keeps ordinary ports out of the reservations.
+
 **"Windows blocked the Strata engine (or the image encoder) ... Smart App Control".**
 On a clean Windows 11, Smart App Control refuses programs that are not signed, and Strata's `strata.exe` and
 `strata-vision.exe` are not (#735). Turn it off (Windows Security > App & browser control > Smart App Control

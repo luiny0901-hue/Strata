@@ -736,8 +736,18 @@ def main():
             except (OSError, ValueError):
                 desktop_error = 'desktop_configuration_invalid'
                 print('Desktop restart recovery is disabled: inspect its saved configuration.', flush=True)
-        server = ThreadingHTTPServer(('127.0.0.1', args.control_port),
-                                     control_handler(supervisor, token, desktop, desktop_error))
+        try:
+            server = ThreadingHTTPServer(('127.0.0.1', args.control_port),
+                                         control_handler(supervisor, token, desktop, desktop_error))
+        except OSError as e:
+            import errno
+            # Windows redraws its reserved port ranges at every start-up, and a range covering this port refuses
+            # the bind (10013); a bare PermissionError says neither that nor what to do about it.
+            hint = (' Windows may keep this port for itself (see `netsh int ipv4 show excludedportrange protocol=tcp`): '
+                    'a PC restart redraws the ranges, or start this with a different --control-port.'
+                    if (getattr(e, 'winerror', None) or e.errno) in (10013, errno.EACCES) else '')
+            raise SystemExit(f'Managed Strata stopped: cannot listen on the control port '
+                             f'127.0.0.1:{args.control_port}: {e}.{hint}') from None
         server.daemon_threads = True
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         try:
