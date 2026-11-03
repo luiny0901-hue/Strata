@@ -49,7 +49,7 @@ OpenCodex는 모델 연결·프로토콜 중계만 담당하고 MCP 도구를 �
 | arxiv | `npx -y @cyanheads/arxiv-mcp-server@1.8.1` | 1.8.1(2026-10-29), Apache-2.0 | 불필요 | `arxiv_search_papers` 성공(MoE 논문 반환) |
 | openalex | `npx -y mcp-remote@0.16.0 https://mcp.openalex.org/mcp` | 공식 호스팅(코드 MIT, 데이터 CC0) | openalex.org 계정 OAuth 서명 1회, 이후 본인 API 키($1/일 크레딧)로 실행. 토큰은 `~/.mcp-auth` 캐시 | 도구 18개 목록 + `search_works` 실호출 성공(rerank된 논문 반환, 2026-11-03) |
 | serena | `~/.local/bin/serena.exe start-mcp-server --project-from-cwd --enable-web-dashboard false` | serena-agent 2.1.0(`uv tool install -p 3.13`), GPL-3.0 | 불필요(로컬) | REPL·`find_symbol`·`get_symbols_overview` 성공. 단 프로젝트 등록(`serena project create <dir> --ls <언어>`) 후 사용 |
-| unity | `unity.exe mcp` | Unity CLI 1.0.0-beta.12(최신 beta.15), Pipeline 패키지 0.9.1-exp.1 | Unity 로그인(에디터가 패키지 다운로드 시 세션 만료로 실패할 수 있음 — `unity auth login` 후 Retry) | 에디터 실측 성공(2026-11-03): 6.6.7f1 실행 중 허브 자식 서버가 도구 110개 노출(CLI `unity list` 기준 166), `get_hierarchy` 호출로 SampleScene 루트 반환. 에디터 발견은 세션의 현재 폴더 기준이라 프로젝트 안에서 실행해야 함(그 외에서는 도구 0개) |
+| unity | `unity.exe mcp` | Unity CLI 1.0.0-beta.12(최신 beta.15), Pipeline 패키지 0.9.1-exp.1 | Unity 로그인(에디터가 패키지 다운로드 시 세션 만료로 실패할 수 있음 — `unity auth login` 후 Retry) | 에디터 실측 성공(2026-11-03, 재확인 11-04): 6.6.7f1 실행 중 허브 자식 서버가 도구 110개 노출(CLI `unity list` 기준 166), `get_hierarchy`가 SampleScene 루트·컴포넌트까지 반환 — CLI(`unity status`)는 현재 폴더 기준이지만 `unity mcp` 서버는 실행 중인 에디터를 전역으로 찾아, 다른 폴더의 Code 세션에서도 도구가 보인다(도구 0개인 경우는 에디터 미실행일 때뿐임) |
 | unreal | `npx -y mcp-remote@0.16.0 http://127.0.0.1:8000/mcp`(stdio→HTTP 브리지) | mcp-remote 0.16.0, MIT | 불필요 | UE 5.8 공식 Unreal MCP(실험, HTTP/SSE만 지원) 연결 경로 확인. 에디터 종료 시 "접속 오류" 정상 보고. UE_5.8 설치에 `ModelContextProtocol`+`ToolsetRegistry` 플러그인 동봉 확인(파일 기준). 에디터 실행 중 도구 호출은 미측정 |
 
 미설치 항목과 근거:
@@ -72,7 +72,7 @@ OpenCodex는 모델 연결·프로토콜 중계만 담당하고 MCP 도구를 �
 
 - 기술 조사: `web_search`(SearXNG 로컬 우선) → 근거는 원문(공식 문서·GitHub) 확인. 라이브러리 API는 `context7`, 오픈소스 구현·커밋·릴리스는 `github`, 모델·데이터셋·논문은 `huggingface`, 논문은 `arxiv`·`openalex`(저자·기관·인용·분석은 openalex), 현재 프로젝트 구조는 `serena`(프로젝트 등록 후), 엔진은 `unity`/`unreal`(각 에디터 실행 중) 순서로 선택.
 - 로컬·무료 우선: 추가 유료 키 필수 항목 없음. Context7 무료 한도(키 있으면 월 1,000호출), GitHub는 gh 토큰 스코프 내 읽기 전용. 429·403 시 재시도·쿨다운은 웹검색 라우터 기준을 따른다.
-- 게임 엔진: 단순 조회·빌드·테스트는 Unity CLI(`unity status`/`command`/`build`/`test`) 우선, MCP(`unity mcp`)는 실행 중 에디터 조작용. CLI·MCP 모두 에디터 발견이 현재 폴더(또는 `--project-path`) 기준이므로 조작할 프로젝트 안에서 실행한다. Unreal은 에디터에서 Auto Start Server 또는 `ModelContextProtocol.StartServer` 실행 후 사용(5.8 공식 플러그인, 실험 단계).
+- 게임 엔진: 단순 조회·빌드·테스트는 Unity CLI(`unity status`/`command`/`build`/`test`) 우선, MCP(`unity mcp`)는 실행 중 에디터 조작용. CLI(`unity status`/`command` 등)는 현재 폴더(또는 `--project-path`) 기준으로 에디터를 찾고, MCP 서버는 실행 중인 에디터를 전역으로 붙는다(11-04 재확인). Unreal은 에디터에서 Auto Start Server 또는 `ModelContextProtocol.StartServer` 실행 후 사용(5.8 공식 플러그인, 실험 단계).
 
 ## 유지보수
 
