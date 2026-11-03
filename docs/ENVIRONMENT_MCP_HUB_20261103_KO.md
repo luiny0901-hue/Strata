@@ -45,9 +45,9 @@ OpenCodex는 모델 연결·프로토콜 중계만 담당하고 MCP 도구를 �
 |---|---|---|---|---|
 | github | `~/.local/bin/github-mcp-server/github-mcp-server.exe stdio --read-only --toolsets=context,issues,pull_requests,repos,users` | v2.1.0(2026-11-03 릴리스, zip sha256 검증), MIT | gh CLI 인증 자동 사용(키링 gho_, repo 범위). PAT 복사 없음 | 도구 27개, `get_me`·`search_repositories` 성공 |
 | context7 | `node.exe …npm\node_modules\@upstash\context7-mcp\dist\index.js`(전역 설치) | 4.5.0, MIT | 키 없음 = 저쿼터(키 있으면 상향, `CONTEXT7_API_KEY`) | `resolve-library-id`·`query-docs` 성공(Next.js 미들웨어 최신 문서 확인) |
-| huggingface | `node.exe …@llmindset/hf-mcp-server\dist\server\stdio.js`(전역 설치) | 0.4.32, MIT | `HF_TOKEN`(기존 `~/.cache/huggingface/token`의 OAuth 토큰을 env에 주입. 만료 시 `hf auth login` 후 갱신 필요) | 익명 `hub_repo_search` 성공, 토큰 설정 후 설정 검증 통과 |
+| huggingface | `node.exe …@llmindset/hf-mcp-server\dist\server\stdio.js`(전역 설치) | 0.4.32, MIT | `DEFAULT_HF_TOKEN`(기존 `~/.cache/huggingface/token`의 OAuth 토큰을 env에 주입 — 코드가 읽는 변수명은 이쪽이고 `HF_TOKEN`은 안내 문구용. 만료 시 `hf auth login` 후 갱신) | 토큰 반영 확인(`hf_whoami` → @luiny0901), `hub_repo_search` 성공 |
 | arxiv | `npx -y @cyanheads/arxiv-mcp-server@1.8.1` | 1.8.1(2026-10-29), Apache-2.0 | 불필요 | `arxiv_search_papers` 성공(MoE 논문 반환) |
-| openalex | `npx -y mcp-remote@0.16.0 https://mcp.openalex.org/mcp` | 공식 호스팅(코드 MIT, 데이터 CC0) | openalex.org 계정 OAuth 서명 1회, 이후 본인 API 키($1/일 크레딧)로 실행. 토큰은 `~/.mcp-auth` 캐시 | 서명 완료 후 도구 18개 목록 성공(`search_works`·`list_citations` 등, 2026-11-03) |
+| openalex | `npx -y mcp-remote@0.16.0 https://mcp.openalex.org/mcp` | 공식 호스팅(코드 MIT, 데이터 CC0) | openalex.org 계정 OAuth 서명 1회, 이후 본인 API 키($1/일 크레딧)로 실행. 토큰은 `~/.mcp-auth` 캐시 | 도구 18개 목록 + `search_works` 실호출 성공(rerank된 논문 반환, 2026-11-03) |
 | serena | `~/.local/bin/serena.exe start-mcp-server --project-from-cwd --enable-web-dashboard false` | serena-agent 2.1.0(`uv tool install -p 3.13`), GPL-3.0 | 불필요(로컬) | REPL·`find_symbol`·`get_symbols_overview` 성공. 단 프로젝트 등록(`serena project create <dir> --ls <언어>`) 후 사용 |
 | unity | `unity.exe mcp` | Unity CLI 1.0.0-beta.12(최신 beta.15), Pipeline 패키지 0.9.1-exp.1 | Unity 로그인(에디터가 패키지 다운로드 시 세션 만료로 실패할 수 있음 — `unity auth login` 후 Retry) | 에디터 실측 성공(2026-11-03): 6.6.7f1 실행 중 허브 자식 서버가 도구 110개 노출(CLI `unity list` 기준 166), `get_hierarchy` 호출로 SampleScene 루트 반환. 에디터 발견은 세션의 현재 폴더 기준이라 프로젝트 안에서 실행해야 함(그 외에서는 도구 0개) |
 | unreal | `npx -y mcp-remote@0.16.0 http://127.0.0.1:8000/mcp`(stdio→HTTP 브리지) | mcp-remote 0.16.0, MIT | 불필요 | UE 5.8 공식 Unreal MCP(실험, HTTP/SSE만 지원) 연결 경로 확인. 에디터 종료 시 "접속 오류" 정상 보고. UE_5.8 설치에 `ModelContextProtocol`+`ToolsetRegistry` 플러그인 동봉 확인(파일 기준). 에디터 실행 중 도구 호출은 미측정 |
@@ -65,6 +65,7 @@ OpenCodex는 모델 연결·프로토콜 중계만 담당하고 MCP 도구를 �
 - **Claude Desktop Code**: 같은 `~/.claude.json`/`strata-mcp.json`을 사용하므로 설정 공유를 확인했다. 새 Code 세션은 앱이 시작한 디스패처 연결을 공유하므로 등록 변경 후 앱 재시작/`/mcp` 재연결이 필요하다. 2026-11-03 재연결 후 재시험에서 arxiv·github 도구 검색, web_search(SearXNG 경로), CUA 회귀가 모두 성공했다.
 - **ChatGPT Desktop**: Codex와 같은 `~/.codex`를 쓰기 때문에 설정은 자동 공유한다. 2026-11-03 실측: 앱을 켜 새 Codex 작업(Strata 모델)에서 `search_tools(server="github")` 요청 프롬프트를 CUA로 전달(백그라운드 `set_value` + 백그라운드 클릭; Chromium 창은 백그라운드 키입력이 차단되고 이 클라이언트에는 전경 승인 창이 없음)했고, 모델이 github 서버 도구 5개(search_code 등 — 읽기 전용 toolset 구성과 일치)를 정확히 보고했다(작업 24초). 생성된 대화 한 건만 남고 파일 변경은 없었다.
 - 모든 테스트에서 OpenCodex→Strata 응답 경로가 유지됨(에러·차단 없음).
+- 기존 3기능 유지 확인(2026-11-03): `web_search`(SearXNG 라우터)는 Desktop Code에서 실제 검색 성공, CUA는 도구 검색 회귀 통과, REA는 207개 도구 연결에 `open_binary` 실분석 성공(PE 형식·sha256 인식). 다만 `binary_overview`가 "분석 provider 사용 불가"(재시도 가능) 비즈니스 오류를 반환 — REA 내부 provider 구성의 문제로 연결층(MCP)과 이번 변경은 정상이며, REA 자체 진단(`rea doctor`)은 남는 항목.
 
 ## 사용 규칙 (요약)
 
