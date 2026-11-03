@@ -55,6 +55,8 @@ class ProfessionalGuidanceTests(unittest.TestCase):
         self.assertIn('카탈로그 전체를 열거하지 말고', guide)
         self.assertIn('Windows Python은 프로젝트 가상환경 실행 파일을 우선 사용하고', guide)
         self.assertIn('WindowsApps 실행 별칭의 잘못된 경로로 실패하면', guide)
+        self.assertIn('-I`나 `-E`를 붙이면', guide)
+        self.assertIn('`-X utf8`를 함께 붙인다', guide)
         self.assertIn('사용 가능한 `mcp__ccd_turn__wrap_up`을 호출한다', guide)
         self.assertIn('해당 앱 도구가 없는 CLI에서는 호출한 척하지 않는다', guide)
 
