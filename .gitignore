@@ -80,3 +80,6 @@ build-vision-cuda12.bat
 # Local source-integration backups, not distributable runtime assets.
 /serve/.response-guard/
 /serve/.vision-source-cache/
+
+# Serena MCP local project state.
+/.serena/

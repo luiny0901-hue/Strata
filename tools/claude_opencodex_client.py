@@ -1173,7 +1173,7 @@ def setup(home, *, verify=True, lazy_cua_rea=True, mcp_config=None):
         hooks.pop('UserPromptSubmit', None)
     hooks['SessionStart'] = direct.merge_hook(hooks.get('SessionStart', []), {
         'matcher': 'startup|resume|clear|compact|fork',
-        'hooks': [{'type': 'command', 'command': command, 'timeout': 3}],
+        'hooks': [{'type': 'command', 'command': command, 'timeout': 5}],
     }, commands)
 
     servers = native.setdefault('mcpServers', {})

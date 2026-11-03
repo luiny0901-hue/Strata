@@ -182,6 +182,8 @@ class SharedClaudeTests(unittest.TestCase):
         self.assertIn('mcp__agent-tools__search_tools', settings['permissions']['allow'])
         self.assertNotIn('mcp__agent-tools__call_tool', settings['permissions']['allow'])
         self.assertEqual(len(settings['hooks']['SessionStart']), 2)
+        managed_hook = next(row for row in settings['hooks']['SessionStart'] if 'matcher' in row)
+        self.assertEqual(managed_hook['hooks'][0]['timeout'], 5)
         self.assertEqual(settings['hooks']['UserPromptSubmit'], [
             {'hooks': [{'type': 'command', 'command': 'user-prompt-hook'}]}])
         self.assertEqual(self.setup_shared()['changed'], 0)
