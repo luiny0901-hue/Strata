@@ -180,6 +180,51 @@ class ProfessionalGuidanceTests(unittest.TestCase):
         self.assertIn('표시 문구와 창작 원고 최종본에 의미 없는 외국어 조각', guide)
         self.assertIn('서술체에 보고용 존댓말을 강제하지 않으며', guide)
 
+    def test_game_world_prose_preserves_causality_and_sentence_roles(self):
+        from tools.strata_client_settings import _codex_guide
+        reminder = policy.language_reminder()
+        for phrase in ['조사·어절 중복과 주제어·주어·서술어의 호응',
+                       '의도된 생략·의인화·장르 어휘는 일괄 금지하지 않는다',
+                       '요청하지 않은 플레이어·시스템·작품 주제 해설을 섞지 않는다',
+                       '단서에서 첫 임무가 이어지게 한다',
+                       '기획서·시스템 설명 요청은 해당 형식을 따른다']:
+            self.assertIn(phrase, reminder)
+        self.assertIn(reminder, _codex_guide())
+        guide = policy.guidance()
+        for phrase in ['조사·어절의 중복과 주제어·실제 주어·서술어의 호응',
+                       '게임 스토리·세계관을 산문으로 요청하면',
+                       '제시된 규칙·인물의 생사·갈등·장면 종료 조건을 먼저 보존하고',
+                       '인물이 발견한 단서와 선택한 첫 임무를 연결하고']:
+            self.assertIn(phrase, guide)
+
+    def test_multi_character_voice_and_branch_state_guidance(self):
+        from tools.strata_client_settings import _codex_guide
+        reminder = policy.language_reminder()
+        for phrase in ['화자→상대별 호칭·높임말을 구분하고',
+                       '각 인물의 대사만 따로 훑어 대조한다',
+                       '긴장·감사·분노 때문에 지정된 높임말을 임의로 바꾸지 않고',
+                       '위치·소지품 소유자·인물별 지식·끝난 행동·금지된 행동',
+                       '게임 대사는 요청한 화자·상대·대사 ID와 실제 발화를 쓰며',
+                       '선택하지 않은 경로의 사건을 이어받지 않는다']:
+            self.assertIn(phrase, reminder)
+        self.assertIn(reminder, _codex_guide())
+        guide = policy.guidance()
+        for phrase in ['같은 인물도 상대마다 말투가 다를 수 있으므로',
+                       '반복 대사로 분량을 채우지 않는다',
+                       '물건의 전달이나 정보 공유가 없는데 소유자·지식이 바뀌지 않게 하고',
+                       '선택지를 요청하면 각 분기를 분리해 모두 쓰고',
+                       '합류는 요청된 시점에만 한다']:
+            self.assertIn(phrase, guide)
+
+    def test_modern_story_device_flow(self):
+        from tools.strata_client_settings import _codex_guide
+        reminder = policy.language_reminder()
+        self.assertIn('회수·운반·전원 연결·작동의 중간 행동 없이 결과만 만들지 않고', reminder)
+        self.assertIn(reminder, _codex_guide())
+        guide = policy.guidance()
+        self.assertIn('물건이 다른 장소에 있거나 장비가 연결되지 않았는데 결과만 성립시키지 않는다', guide)
+        self.assertIn('서로 다른 장비의 작동 조건을 혼동하지 않는다', guide)
+
     def test_ui_strings_follow_screen_word_conventions(self):
         from tools.strata_client_settings import _codex_guide
         reminder = policy.language_reminder()
