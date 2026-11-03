@@ -1,7 +1,8 @@
-"""On-demand access to configured CUA/REA MCP servers and optional public web search.
+"""On-demand access to configured MCP servers (CUA, REA, toolsets) and optional public web search.
 
 The parent exposes two small tools. A child MCP server is started only when
 search_tools selects it; tools/call accepts names returned by that search.
+Managed servers are cua-driver/rea; additional toolset servers come from the config's toolsetServers block.
 """
 from __future__ import annotations
 
@@ -50,20 +51,24 @@ QUERY_ALIASES = {
     "함수": "function", "클래스": "class", "리소스": "resource",
 }
 
+SERVER_SUMMARIES = {
+    "cua-driver": "GUI observation or interaction only",
+    "rea": "reverse engineering a built program or application only",
+}
+
 TOOL_DEFS = [
     {
         "name": "search_tools",
         "description": (
-            "Search the on-demand CUA or REA MCP catalog before calling a tool. "
-            "Choose cua-driver only for GUI observation or interaction; choose rea only for "
-            "reverse engineering a built program or application. Ordinary source-code reading "
-            "uses native file tools. Returns a few matching tools and their exact input schemas."
+            "Search the on-demand MCP catalog of one registered server before calling a tool. "
+            "Returns a few matching tools and their exact input schemas. Ordinary source-code reading "
+            "uses native file tools."
         ),
         "inputSchema": {
             "type": "object",
             "additionalProperties": False,
             "properties": {
-                "server": {"type": "string", "enum": ["cua-driver", "rea"]},
+                "server": {"type": "string", "enum": []},
                 "query": {"type": "string", "minLength": 2, "maxLength": 200},
                 "limit": {"type": "integer", "minimum": 1, "maximum": MAX_SEARCH_RESULTS},
             },
@@ -74,7 +79,7 @@ TOOL_DEFS = [
     {
         "name": "call_tool",
         "description": (
-            "Call one exact CUA or REA tool returned by search_tools in this session. "
+            "Call one exact tool returned by search_tools in this session. "
             "Use its returned input schema and pass arguments unchanged. Do not retry a call "
             "whose outcome is ambiguous; inspect its result first."
         ),
@@ -82,7 +87,7 @@ TOOL_DEFS = [
             "type": "object",
             "additionalProperties": False,
             "properties": {
-                "server": {"type": "string", "enum": ["cua-driver", "rea"]},
+                "server": {"type": "string", "enum": []},
                 "name": {"type": "string", "minLength": 1, "maxLength": 160},
                 "arguments": {"type": "object"},
             },
@@ -99,12 +104,14 @@ class DispatcherError(RuntimeError):
 class ChildServer:
     """One serialized JSON-RPC connection to a lazily started stdio MCP child."""
 
-    def __init__(self, name: str, command: list[str], env: dict[str, str] | None = None):
-        if name not in ("cua-driver", "rea") or not command or not all(isinstance(x, str) for x in command):
+    def __init__(self, name: str, command: list[str], env: dict[str, str] | None = None,
+                 summary: str | None = None):
+        if not isinstance(name, str) or not name or not command or not all(isinstance(x, str) for x in command):
             raise DispatcherError("invalid configured MCP server")
         self.name = name
         self.command = command
         self.env = env or {}
+        self.summary = summary or SERVER_SUMMARIES.get(name) or name
         self.process: subprocess.Popen | None = None
         self.responses: queue.Queue[dict] = queue.Queue(maxsize=MAX_QUEUED_RESPONSES)
         self.reader_done = threading.Event()
@@ -369,7 +376,8 @@ class ChildServer:
 
 
 def configured_servers(config_path: Path) -> dict[str, ChildServer]:
-    projected = mcp_config.read(config_path).get("mcpServers", {})
+    document = mcp_config.read(config_path)
+    projected = document.get("mcpServers", {})
     result = {}
     for name in ("cua-driver", "rea"):
         row = projected.get(name)
@@ -382,6 +390,9 @@ def configured_servers(config_path: Path) -> dict[str, ChildServer]:
         if not isinstance(env, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in env.items()):
             raise DispatcherError(f"invalid environment configuration for {name}")
         result[name] = ChildServer(name, command, env)
+    for name, row in document.get("toolsetServers", {}).items():
+        command = [row.get("command"), *row.get("args", [])]
+        result[name] = ChildServer(name, command, row.get("env", {}), summary=row.get("summary"))
     if not result:
         raise DispatcherError("Claude MCP config has no enabled local CUA or REA server")
     return result
@@ -436,7 +447,15 @@ class Dispatcher:
         )
 
     def tool_definitions(self) -> list[dict]:
-        tools = list(TOOL_DEFS)
+        names = list(self.servers)
+        server_note = "; ".join(f"{name} — {getattr(server, 'summary', name)}" for name, server in self.servers.items())
+        tools = []
+        for tool in TOOL_DEFS:
+            row = json.loads(json.dumps(tool))
+            row["inputSchema"]["properties"]["server"]["enum"] = names
+            if server_note:
+                row["description"] += f" Registered servers: {server_note}."
+            tools.append(row)
         if self.search_router.available:
             tools.append(web_search_router.WEB_SEARCH_TOOL_DEF)
         return tools
@@ -475,15 +494,15 @@ class Dispatcher:
                 "capabilities": {"tools": {"listChanged": False}},
                 "serverInfo": {"name": "strata-agent-tools", "version": "1.0.0"},
                 "instructions": (
-                    "Use CUA only for requested GUI observation or interaction, and REA only for reverse engineering "
-                    "existing built applications. "
+                    "Use CUA only for requested GUI observation or interaction, REA only for reverse engineering "
+                    "existing built applications, and each other registered toolset server only for its advertised purpose. "
                     + ("웹검색이 필요하면 이 MCP의 web_search를 내장 WebSearch·web.run·search_service_web_run, "
-                       "브라우저·셸 검색보다 먼저 직접 호출하세요. search_tools·call_tool은 CUA·REA 전용입니다. "
+                       "브라우저·셸 검색보다 먼저 직접 호출하세요. search_tools·call_tool은 등록 서버 카탈로그 전용입니다. "
                        "결과 수는 count 인자를 사용하세요. 인자 오류는 제공된 스키마에 맞게 수정하고, "
                        "MCP 검색의 부재·비활성화 또는 실제 실패가 확인된 경우에만 이유를 밝히고 다른 검색 경로를 사용하세요. "
                        if self.search_router.available else "")
                     + "never include private code, logs, credentials, or personal data in search queries. "
-                    "First search the selected CUA/REA catalog narrowly and call only a returned tool with its exact schema."
+                    "First search the selected server catalog narrowly and call only a returned tool with its exact schema."
                 ),
             })
         if method == "ping":
@@ -502,7 +521,7 @@ class Dispatcher:
                     selected = args.get("server")
                     if selected not in self.servers:
                         raise DispatcherError(
-                            'search_tools는 server="cua-driver" 또는 server="rea"의 하위 도구 검색 전용입니다. '
+                            f'search_tools는 등록 서버({", ".join(self.servers)})의 하위 도구 검색 전용입니다. '
                             '웹검색은 별도 MCP web_search를 직접 호출하세요. '
                             '예: {"query":"공개 문서 검색어","count":3}. '
                             '웹 페이지 읽기 도구를 이 하위 카탈로그에서 찾지 마세요.'
@@ -517,7 +536,8 @@ class Dispatcher:
                     if selected not in self.servers or not isinstance(tool_name, str) or not isinstance(tool_args, dict):
                         raise DispatcherError(
                             'call_tool에는 server, 검색으로 확인한 name, 객체 arguments가 필요합니다. '
-                            'server는 cua-driver 또는 rea입니다. 웹검색은 이 도구를 거치지 않고 '
+                            f'server는 등록 서버({", ".join(self.servers)}) 중 하나입니다. '
+                            '웹검색은 이 도구를 거치지 않고 '
                             '별도 MCP web_search를 query·count 인자로 직접 호출하세요.'
                         )
                     return self.response(rid, self.servers[selected].call(tool_name, tool_args, cancel_event))

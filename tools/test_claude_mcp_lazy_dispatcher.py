@@ -135,7 +135,7 @@ class LazyMcpDispatcherTests(unittest.TestCase):
         self.addCleanup(dispatcher.close)
         instructions = dispatcher.handle(request)['result']['instructions']
         for contract in ('web_search', '내장 WebSearch', '먼저 직접 호출',
-                         'search_tools·call_tool은 CUA·REA 전용',
+                         'search_tools·call_tool은 등록 서버 카탈로그 전용',
                          'count', '부재·비활성화 또는 실제 실패'):
             self.assertIn(contract, instructions)
         description = dispatcher.tool_definitions()[-1]['description']
@@ -332,6 +332,79 @@ class LazyMcpDispatcherTests(unittest.TestCase):
         self.assertTrue(cancel_marker.exists(), 'parent cancel notification was not forwarded')
         self.assertEqual(messages[0]['error']['code'], -32800)
         self.assertIn('verify before retrying', messages[0]['error']['message'])
+
+
+class ToolsetDispatcherTests(unittest.TestCase):
+    """Configured toolsetServers join the same search_tools/call_tool surface as CUA/REA."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        child = Path(self.temp.name) / "child.py"
+        child.write_text(CHILD, encoding="utf-8")
+        self.child = child
+        config_path = Path(self.temp.name) / "strata-mcp.json"
+        config_path.write_text(json.dumps({
+            "mcpServers": {
+                "cua-driver": {"type": "stdio", "command": sys.executable, "args": [str(child), "cua-driver"]},
+            },
+            "toolsetServers": {
+                "context7": {"type": "stdio", "command": sys.executable, "args": [str(child), "context7"],
+                             "summary": "library docs"},
+            },
+        }), encoding="utf-8")
+        self.servers = lazy.configured_servers(config_path)
+        self.dispatcher = lazy.Dispatcher(self.servers)
+        self.addCleanup(self.dispatcher.close)
+
+    def call(self, name, arguments, rid=1):
+        return self.dispatcher.handle({"jsonrpc": "2.0", "id": rid, "method": "tools/call",
+                                       "params": {"name": name, "arguments": arguments}})
+
+    def test_tools_list_advertises_toolset_in_server_enum_and_summary(self):
+        tools = self.dispatcher.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})["result"]["tools"]
+        self.assertEqual(tools[0]["inputSchema"]["properties"]["server"]["enum"], ["cua-driver", "context7"])
+        self.assertIn("context7 — library docs", tools[0]["description"])
+        self.assertLess(len(json.dumps(tools)), 4000)
+
+    def test_search_and_call_route_to_toolset_child_without_touching_cua(self):
+        response = self.call("search_tools", {"server": "context7", "query": "window", "limit": 1})
+        payload = json.loads(response["result"]["content"][0]["text"])
+        self.assertEqual(payload["tools"][0]["name"], "context7_list_windows")
+        self.assertIsNone(self.servers["cua-driver"].process)
+        called = self.call("call_tool", {"server": "context7", "name": "context7_list_windows", "arguments": {}})
+        self.assertFalse(called["result"]["isError"])
+
+    def test_unregistered_server_error_lists_registered_servers_and_web_search(self):
+        response = self.call("search_tools", {"server": "nope", "query": "window"})
+        text = response["result"]["content"][0]["text"]
+        self.assertTrue(response["result"]["isError"])
+        self.assertIn("context7", text)
+        self.assertIn("web_search", text)
+        self.assertIn("직접 호출", text)
+
+    def test_invalid_toolset_configurations_are_rejected(self):
+        from tools import claude_mcp_config
+        cases = {
+            "collision with managed name": {"cua-driver": {"type": "stdio", "command": "x", "summary": "dup"}},
+            "missing summary": {"ok": {"type": "stdio", "command": "x"}},
+            "not stdio": {"ok": {"type": "http", "command": "x", "summary": "s"}},
+            "uppercase name": {"Context7": {"type": "stdio", "command": "x", "summary": "s"}},
+        }
+        for label, toolsets in cases.items():
+            with self.subTest(label), self.assertRaises(ValueError):
+                claude_mcp_config.normalize({"mcpServers": {"rea": {"type": "stdio", "command": "x"}},
+                                             "toolsetServers": toolsets})
+
+    def test_normalize_preserves_valid_toolset_entries_unchanged(self):
+        from tools import claude_mcp_config
+        document = {"mcpServers": {"rea": {"type": "stdio", "command": "x"}},
+                    "toolsetServers": {"arxiv": {"type": "stdio", "command": "y", "args": ["a"],
+                                                 "env": {"K": "v"}, "summary": "papers"}}}
+        normalized = claude_mcp_config.normalize(document)
+        self.assertEqual(normalized["toolsetServers"], {"arxiv": {"type": "stdio", "command": "y", "args": ["a"],
+                                                                  "env": {"K": "v"}, "summary": "papers"}})
+        self.assertEqual(normalized, claude_mcp_config.normalize(normalized))
 
 
 if __name__ == "__main__":
