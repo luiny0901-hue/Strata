@@ -19,6 +19,8 @@ offers the same steps as tools.
 - AMD (HIP) build and validation: [docs/AMD_HIP.md](docs/AMD_HIP.md); multi-GPU: [docs/MULTI_GPU.md](docs/MULTI_GPU.md).
 - Setup's own tests run without a GPU or downloads: `python tools/test_setup_<name>.py` (for example
   `tools/test_setup_amd.py`, `tools/test_setup_choices.py`).
+- The Claude-config tools' tests (`tools/test_claude_*.py`) run from the repository root as
+  `python -m tools.test_<name>`; running one directly as `python tools/test_<name>.py` fails at import.
 - Keep the docs' style: plain words, measured numbers with what they were measured on, no claims without a
   measurement.
 
