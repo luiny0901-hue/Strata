@@ -32,6 +32,24 @@ for line in sys.stdin:
         print(json.dumps({"jsonrpc": "2.0", "id": rid, "result": result}), flush=True)
 '''
 
+GATED_CHILD = r'''import json, os, sys
+if not os.path.exists(os.environ["READY_MARKER"]):
+    sys.exit(3)
+for line in sys.stdin:
+    request = json.loads(line)
+    method, rid = request.get("method"), request.get("id")
+    if method == "initialize":
+        result = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}}, "serverInfo": {"name": "gated"}}
+    elif method == "tools/list":
+        result = {"tools": [{"name": "rea_hello", "description": "Say hello", "inputSchema": {"type": "object"}}]}
+    elif method == "tools/call":
+        result = {"content": [{"type": "text", "text": "hello"}], "isError": False}
+    else:
+        continue
+    if rid is not None:
+        print(json.dumps({"jsonrpc": "2.0", "id": rid, "result": result}), flush=True)
+'''
+
 SLOW_CHILD = r'''import json, os, sys, time
 for line in sys.stdin:
     request = json.loads(line)
@@ -235,6 +253,20 @@ class LazyMcpDispatcherTests(unittest.TestCase):
         self.assertIsNone(self.rea.process)
         with self.assertRaises(lazy.DispatcherError):
             lazy.search_catalog(self.cua, " ")
+
+    def test_exited_startup_child_retries_when_no_call_was_issued(self):
+        root = Path(self.temp.name)
+        child = root / "gated_child.py"
+        child.write_text(GATED_CHILD, encoding="utf-8")
+        marker = root / "ready.marker"
+        server = lazy.ChildServer("rea", [sys.executable, str(child)], {"READY_MARKER": str(marker)})
+        self.addCleanup(server.close)
+        with self.assertRaises(lazy.DispatcherError):
+            server.tools()
+        self.assertEqual(server.issued_calls, 0)
+        marker.write_text("ok", encoding="utf-8")
+        catalog = server.tools()
+        self.assertIn("rea_hello", catalog)
 
     def test_tool_catalog_rejects_repeated_pagination_cursor(self):
         child = Path(self.temp.name) / "repeated_cursor_child.py"

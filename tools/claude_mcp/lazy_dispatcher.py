@@ -127,6 +127,7 @@ class ChildServer:
         self.search_index: list[tuple] = []
         self.discovered: set[str] = set()
         self.interrupted = False
+        self.issued_calls = 0
 
     def _start(self, cancel_event=None):
         if self.interrupted:
@@ -136,7 +137,17 @@ class ChildServer:
         if self.process is not None:
             if self.process.poll() is None:
                 return
-            raise DispatcherError(f"{self.name} MCP process exited")
+            if self.issued_calls:
+                raise DispatcherError(f"{self.name} MCP process exited")
+            # The child died during startup with no tool call dispatched: it never received work,
+            # so a retry is safe. Engine-backed servers may exit while their editor is still closed.
+            self.process = None
+            while True:
+                try:
+                    self.responses.get_nowait()
+                except queue.Empty:
+                    break
+            self.reader_done.clear()
         child_env = os.environ.copy()
         child_env.update(self.env)
         try:
@@ -207,6 +218,8 @@ class ChildServer:
             raise DispatcherError("request cancelled before dispatch")
         self.request_id += 1
         rid = self.request_id
+        if method == "tools/call":
+            self.issued_calls += 1
         assert self.process is not None and self.process.stdin is not None
         request = {"jsonrpc": "2.0", "id": rid, "method": method, "params": params}
         try:
