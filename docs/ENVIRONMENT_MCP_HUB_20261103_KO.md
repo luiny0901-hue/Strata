@@ -49,8 +49,8 @@ OpenCodex는 모델 연결·프로토콜 중계만 담당하고 MCP 도구를 �
 | arxiv | `npx -y @cyanheads/arxiv-mcp-server@1.8.1` | 1.8.1(2026-10-29), Apache-2.0 | 불필요 | `arxiv_search_papers` 성공(MoE 논문 반환) |
 | openalex | `npx -y mcp-remote@0.16.0 https://mcp.openalex.org/mcp` | 공식 호스팅(코드 MIT, 데이터 CC0) | openalex.org 계정 OAuth 서명 1회, 이후 본인 API 키($1/일 크레딧)로 실행. 토큰은 `~/.mcp-auth` 캐시 | 서명 완료 후 도구 18개 목록 성공(`search_works`·`list_citations` 등, 2026-11-03) |
 | serena | `~/.local/bin/serena.exe start-mcp-server --project-from-cwd --enable-web-dashboard false` | serena-agent 2.1.0(`uv tool install -p 3.13`), GPL-3.0 | 불필요(로컬) | REPL·`find_symbol`·`get_symbols_overview` 성공. 단 프로젝트 등록(`serena project create <dir> --ls <언어>`) 후 사용 |
-| unity | `unity.exe mcp` | Unity CLI 1.0.0-beta.12(최신 beta.15) | Unity 로그인(필요 시) | 연결 성공, 에디터 종료 상태에서는 도구 0개(정상). 에디터+Pipeline 패키지 실행 중에만 도구 노출 |
-| unreal | `npx -y mcp-remote@0.16.0 http://127.0.0.1:8000/mcp`(stdio→HTTP 브리지) | mcp-remote 0.16.0, MIT | 불필요 | UE 5.8 공식 Unreal MCP(실험, HTTP/SSE만 지원) 연결 경로 확인. 에디터 종료 시 "접속 오류" 정상 보고. 에디터 실행 중 도구 호출은 미측정 |
+| unity | `unity.exe mcp` | Unity CLI 1.0.0-beta.12(최신 beta.15), Pipeline 패키지 0.9.1-exp.1 | Unity 로그인(에디터가 패키지 다운로드 시 세션 만료로 실패할 수 있음 — `unity auth login` 후 Retry) | 에디터 실측 성공(2026-11-03): 6.6.7f1 실행 중 허브 자식 서버가 도구 110개 노출(CLI `unity list` 기준 166), `get_hierarchy` 호출로 SampleScene 루트 반환. 에디터 발견은 세션의 현재 폴더 기준이라 프로젝트 안에서 실행해야 함(그 외에서는 도구 0개) |
+| unreal | `npx -y mcp-remote@0.16.0 http://127.0.0.1:8000/mcp`(stdio→HTTP 브리지) | mcp-remote 0.16.0, MIT | 불필요 | UE 5.8 공식 Unreal MCP(실험, HTTP/SSE만 지원) 연결 경로 확인. 에디터 종료 시 "접속 오류" 정상 보고. UE_5.8 설치에 `ModelContextProtocol`+`ToolsetRegistry` 플러그인 동봉 확인(파일 기준). 에디터 실행 중 도구 호출은 미측정 |
 
 미설치 항목과 근거:
 
@@ -70,7 +70,7 @@ OpenCodex는 모델 연결·프로토콜 중계만 담당하고 MCP 도구를 �
 
 - 기술 조사: `web_search`(SearXNG 로컬 우선) → 근거는 원문(공식 문서·GitHub) 확인. 라이브러리 API는 `context7`, 오픈소스 구현·커밋·릴리스는 `github`, 모델·데이터셋·논문은 `huggingface`, 논문은 `arxiv`·`openalex`(저자·기관·인용·분석은 openalex), 현재 프로젝트 구조는 `serena`(프로젝트 등록 후), 엔진은 `unity`/`unreal`(각 에디터 실행 중) 순서로 선택.
 - 로컬·무료 우선: 추가 유료 키 필수 항목 없음. Context7 무료 한도(키 있으면 월 1,000호출), GitHub는 gh 토큰 스코프 내 읽기 전용. 429·403 시 재시도·쿨다운은 웹검색 라우터 기준을 따른다.
-- 게임 엔진: 단순 조회·빌드·테스트는 Unity CLI(`unity status`/`command`/`build`/`test`) 우선, MCP(`unity mcp`)는 실행 중 에디터 조작용. Unreal은 에디터에서 Auto Start Server 또는 `ModelContextProtocol.StartServer` 실행 후 사용(5.8 공식 플러그인, 실험 단계).
+- 게임 엔진: 단순 조회·빌드·테스트는 Unity CLI(`unity status`/`command`/`build`/`test`) 우선, MCP(`unity mcp`)는 실행 중 에디터 조작용. CLI·MCP 모두 에디터 발견이 현재 폴더(또는 `--project-path`) 기준이므로 조작할 프로젝트 안에서 실행한다. Unreal은 에디터에서 Auto Start Server 또는 `ModelContextProtocol.StartServer` 실행 후 사용(5.8 공식 플러그인, 실험 단계).
 
 ## 유지보수
 
@@ -78,4 +78,6 @@ OpenCodex는 모델 연결·프로토콜 중계만 담당하고 MCP 도구를 �
 - 디스패처·설정기 검사 묶음: 위 "검사" 항목의 unittest 명령.
 - Unity·Unreal·Serena는 상태 의존형이라 에디터/프로젝트 준비가 먼저다: Unity는 프로젝트에 Pipeline 패키지(`unity pipeline install`) 후 에디터 실행, Unreal은 플러그인(`Unreal MCP`+`All Toolsets`) 활성화 후 `ModelContextProtocol.StartServer`, Serena는 `serena project create <프로젝트> --ls <언어>`.
 - OpenAlex: 서명 토큰은 `~/.mcp-auth`에 캐시되고 첫 연결 때 브라우저 서명 창이 열린다. 연결 초기화는 서명 보유 인스턴스가 콜백 포트 20400을 소유하므로, 잔류 mcp-remote가 있으면 새 인스턴스는 대기만 한다 — 초기화하려면 `~/.mcp-auth`의 openalex 항목과 잔류 프로세스를 정리 후 다시 연결한다. 무료 크레딧($1/일) 소진은 계정 페이지에서 확인한다.
-- 남은 문제: ① Unity 에디터 실행 중 도구 목록·호출 실측, ② Unreal 에디터 실행 중 도구 호출 실측, ③ 생성 지침(`~/.claude/CLAUDE.md`)의 'CUA·REA 전용' 문장은 생성물이라 설정 재적용 시점에 갱신(정본 `examples/claude/KOREAN_INSTRUCTIONS.md`는 이번 턴에 고쳤으나 해당 파일의 진행 중 작업과 함께 커밋될 예정), ④ Unity CLI는 beta.15가 최신이나 이번 작업 범위 밖이라 올리지 않았다.
+- Unity 재측정: 테스트 프로젝트 `C:\Users\luiny\UnityProjects\mcp-hub-check`(6.6.7f1, Pipeline 설치됨)를 `unity open`으로 열고 프로젝트 폴더에서 `unity status`/`list`를 실행하면 된다(에디터 종료 후 재열기 시 패키지 인증 오류가 나면 `unity auth login` 후 Retry). 실측 뒤 에디터는 `unity close .`(프로젝트 폴더에서)로 정상 종료 확인.
+- Unreal: UE_5.8 엔진에 공식 `ModelContextProtocol`+`ToolsetRegistry` 플러그인 동봉을 파일 기준으로 확인함(2026-11-03). 에디터 실행 중 호출 실측은 실제 UE 프로젝트-opening 시점에 `ModelContextProtocol.StartServer` 후 진행(실험 기능).
+- 남은 문제: ① Unreal 에디터 실행 중 도구 호출 실측(위), ② 생성 지침(`~/.claude/CLAUDE.md`)의 'CUA·REA 전용' 문장은 생성물이라 설정 재적용 시점에 갱신(정본 `examples/claude/KOREAN_INSTRUCTIONS.md`는 이번 턴에 고쳤으나 해당 파일의 진행 중 작업과 함께 커밋될 예정), ③ Unity CLI는 beta.15가 최신이나 이번 작업 범위 밖이라 올리지 않았다.
