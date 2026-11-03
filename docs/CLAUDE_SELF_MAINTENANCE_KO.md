@@ -98,7 +98,7 @@ Claude Desktop에 답변 본문이 보이는데 턴이 계속 실행 중일 때�
 
 Desktop의 `/context`에서 `MCP tools` 합계는 제품 내장 Code·브라우저·터미널·예약 작업 도구까지 포함할 수 있다. 일반 프로젝트의 on-demand 사용자 MCP는 `agent-tools` 기본 2개와 선택형 웹 검색 도구이며, 유지보수 프로젝트에서만 `strata-maintenance` 9개가 추가된다. 이 두 서버 외부의 도구 수/토큰을 CUA·REA 스키마 비용으로 계산하지 말고, 앱 내장 도구를 사용자 MCP 설정에서 삭제하려고 하지 않는다. 사용자가 관리하는 MCP 중복은 `doctor.mcp_delivery.duplicate_direct_servers`로 확인한다.
 
-`agent-tools`의 `toolsetServers`는 공통 toolset 서버(github, context7, huggingface, arxiv, serena, unity, unreal)를 등록해 CUA·REA와 같이 `search_tools`로 선택된 쪽만 시작하므로 부모 스키마는 2~3개로 유지된다. 등록 정본은 `~/.claude/strata-mcp.json`의 `toolsetServers`이고, 서버별 실행·인증·실측·남은 문제와 추가 방법은 `docs/ENVIRONMENT_MCP_HUB_20261103_KO.md`에 있다.
+`agent-tools`의 `toolsetServers`는 공통 toolset 서버(github, context7, huggingface, arxiv, openalex, serena, unity, unreal)를 등록해 CUA·REA와 같이 `search_tools`로 선택된 쪽만 시작하므로 부모 스키마는 2~3개로 유지된다. 등록 정본은 `~/.claude/strata-mcp.json`의 `toolsetServers`이고, 서버별 실행·인증·실측·남은 문제와 추가 방법은 `docs/ENVIRONMENT_MCP_HUB_20261103_KO.md`에 있다.
 
 사용자가 Claude Desktop Code 세션에서 권한 확인을 생략하도록 명시적으로 요청한 경우에는 MCP 도구별 `allow` 규칙을 넓히지 말고 앱 수준 권한 모드를 사용한다. Claude Desktop 설정의 Claude Code 항목에서 `Allow bypass permissions mode`를 켜고, 요청된 경우 사용자 `settings.json`의 `defaultMode`를 설정한다. 기존 저장값이나 폴더 신뢰만으로 현재 세션 모드를 추정하지 말고 Code 화면의 모드가 `권한 무시`인지 확인한다. `agent-tools.call_tool`을 전역 허용 목록에 추가하지 않는다. 이 모드는 세션에서 명령과 도구의 확인창을 건너뛰므로 사용자의 명시적 선택이 필요하며, 코드·환경을 바꾸지 않은 도구 경로 시험으로 한 번 확인한 사실을 모든 도구·후속 세션의 검증으로 확대하지 않는다.
 
