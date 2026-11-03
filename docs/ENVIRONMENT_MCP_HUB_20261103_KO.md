@@ -63,7 +63,7 @@ OpenCodex는 모델 연결·프로토콜 중계만 담당하고 MCP 도구를 �
 - **Codex CLI**: `codex exec`로 agent-tools→search_tools→call_tool(github) 및 context7 3단계 시나리오 성공(총 27,243·29,178토큰). `CODEX_HOME` 미설정이므로 `~/.codex/config.toml`이 실제 사용 경로다.
 - **Claude CLI**: 사용자 범위 설정에서 agent-tools 공유. 단 Desktop 전용 `CLAUDE_*`·`ANTHROPIC_*` 변수를 제거한 격리 실행(`claude -p`)에서만 정상(기존 관측과 동일). arxiv 도구 호출 성공(exit 0).
 - **Claude Desktop Code**: 같은 `~/.claude.json`/`strata-mcp.json`을 사용하므로 설정 공유를 확인했다. 새 Code 세션은 앱이 시작한 디스패처 연결을 공유하므로 등록 변경 후 앱 재시작/`/mcp` 재연결이 필요하다. 2026-11-03 재연결 후 재시험에서 arxiv·github 도구 검색, web_search(SearXNG 경로), CUA 회귀가 모두 성공했다.
-- **ChatGPT Desktop**: Codex와 같은 `~/.codex`를 쓰기 때문에 설정은 자동 공유(파일 단위 확인). 앱 내 실제 도구 호출은 미검증(수동 권장 절차는 아래).
+- **ChatGPT Desktop**: Codex와 같은 `~/.codex`를 쓰기 때문에 설정은 자동 공유한다. 2026-11-03 실측: 앱을 켜 새 Codex 작업(Strata 모델)에서 `search_tools(server="github")` 요청 프롬프트를 CUA로 전달(백그라운드 `set_value` + 백그라운드 클릭; Chromium 창은 백그라운드 키입력이 차단되고 이 클라이언트에는 전경 승인 창이 없음)했고, 모델이 github 서버 도구 5개(search_code 등 — 읽기 전용 toolset 구성과 일치)를 정확히 보고했다(작업 24초). 생성된 대화 한 건만 남고 파일 변경은 없었다.
 - 모든 테스트에서 OpenCodex→Strata 응답 경로가 유지됨(에러·차단 없음).
 
 ## 사용 규칙 (요약)
@@ -78,4 +78,4 @@ OpenCodex는 모델 연결·프로토콜 중계만 담당하고 MCP 도구를 �
 - 디스패처·설정기 검사 묶음: 위 "검사" 항목의 unittest 명령.
 - Unity·Unreal·Serena는 상태 의존형이라 에디터/프로젝트 준비가 먼저다: Unity는 프로젝트에 Pipeline 패키지(`unity pipeline install`) 후 에디터 실행, Unreal은 플러그인(`Unreal MCP`+`All Toolsets`) 활성화 후 `ModelContextProtocol.StartServer`, Serena는 `serena project create <프로젝트> --ls <언어>`.
 - OpenAlex: 서명 토큰은 `~/.mcp-auth`에 캐시되고 첫 연결 때 브라우저 서명 창이 열린다. 연결 초기화는 서명 보유 인스턴스가 콜백 포트 20400을 소유하므로, 잔류 mcp-remote가 있으면 새 인스턴스는 대기만 한다 — 초기화하려면 `~/.mcp-auth`의 openalex 항목과 잔류 프로세스를 정리 후 다시 연결한다. 무료 크레딧($1/일) 소진은 계정 페이지에서 확인한다.
-- 남은 문제: ① ChatGPT Desktop 앱 안에서의 toolset 호출 확인(설정은 Codex와 공유, GUI 호출은 미측정), ② Unity 에디터 실행 중 도구 목록·호출 실측, ③ Unreal 에디터 실행 중 도구 호출 실측, ④ OpenAlex 미등록(계정), ⑤ 생성 지침(`~/.claude/CLAUDE.md`)의 'CUA·REA 전용' 문장은 생성물이라 설정 재적용 시점에 갱신(정본 `examples/claude/KOREAN_INSTRUCTIONS.md`는 이번 턴에 고쳤으나 해당 파일의 진행 중 작업과 함께 커밋될 예정), ⑥ Unity CLI는 beta.15가 최신이나 이번 작업 범위 밖이라 올리지 않았다.
+- 남은 문제: ① Unity 에디터 실행 중 도구 목록·호출 실측, ② Unreal 에디터 실행 중 도구 호출 실측, ③ 생성 지침(`~/.claude/CLAUDE.md`)의 'CUA·REA 전용' 문장은 생성물이라 설정 재적용 시점에 갱신(정본 `examples/claude/KOREAN_INSTRUCTIONS.md`는 이번 턴에 고쳤으나 해당 파일의 진행 중 작업과 함께 커밋될 예정), ④ Unity CLI는 beta.15가 최신이나 이번 작업 범위 밖이라 올리지 않았다.
