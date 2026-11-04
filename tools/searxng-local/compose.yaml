@@ -13,3 +13,20 @@ services:
     volumes:
       - ./config:/etc/searxng
       - ./cache:/var/cache/searxng
+  # Bridge for Claude Desktop's managed "Web search" server: POST {"q"} ->
+  # results[] here, forwarded to SearXNG's GET JSON API. No API key needed.
+  search-gateway:
+    image: python:3.12-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8890:8090"
+    environment:
+      SEARX_UPSTREAM: http://searxng:8080
+      TLS_CERT: /app/certs/server.crt
+      TLS_KEY: /app/certs/server.key
+    volumes:
+      - ./search_gateway.py:/app/search_gateway.py:ro
+      - ./certs:/app/certs:ro
+    command: ["python", "/app/search_gateway.py"]
+    depends_on:
+      - searxng
