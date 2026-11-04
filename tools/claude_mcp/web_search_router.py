@@ -1,6 +1,7 @@
 """Route one Claude web_search tool across free APIs and local SearXNG."""
 from __future__ import annotations
 
+import os
 from datetime import date, datetime, timedelta, timezone
 
 from . import exa_search, local_docs_index, searxng_search, tavily_search
@@ -22,9 +23,10 @@ WEB_SEARCH_TOOL_DEF = {
         "웹검색 시 내장 검색·브라우저·셸 검색보다 이 MCP 도구를 먼저 직접 호출하세요. "
         "search_tools·call_tool을 거치지 않으며 결과 수는 count로 지정합니다. "
         "Check a short process-memory cache for identical recent requests, then search indexed official "
-        "software/AI/game documentation locally when it clearly matches. Otherwise search the public web through Exa first, "
-        "Tavily free/basic as backup, then this PC's local SearXNG when API allowance or provider rate limits are reached. "
-        "The local fallback has no hourly or daily request-count quota and spaces SearXNG requests by at least 5 seconds, but upstream engines can still throttle or block it; "
+        "software/AI/game documentation locally when it clearly matches. Otherwise search this PC's local SearXNG first; "
+        "its free Exa and Tavily backup runs only when local search fails or finds nothing, which conserves their monthly allowances "
+        "(set WEB_SEARCH_ORDER=api to prefer the APIs). SearXNG has no hourly or daily request-count quota and spaces its requests by at least 5 seconds, "
+        "but upstream engines can still throttle or block it; "
         "no search provider can guarantee unlimited use or zero IP blocks. Queries are sent to the selected provider. "
         "Search cache entries are kept in process memory only; recent/news queries have a shorter lifetime. "
         "Never include private code, logs, repository names, credentials, or personal data. "
@@ -180,11 +182,61 @@ class WebSearchRouter:
         except SearchCacheCancelled:
             raise WebSearchError("웹 검색 요청이 취소되었습니다.") from None
 
+    def _local_first(self) -> bool:
+        # Local priority is the default so free API allowances are spent only
+        # when SearXNG fails or finds nothing. WEB_SEARCH_ORDER=api restores
+        # the old Exa-first order.
+        return os.environ.get("WEB_SEARCH_ORDER", "local").strip().lower() != "api"
+
+    def _has_api_backup(self) -> bool:
+        return bool(self.exa_api_key or self.tavily_api_key)
+
+    def _searxng_attempt(self, args: dict, cancel_event) -> dict:
+        category = args["category"]
+        # SearXNG의 it 분류는 공식 문서보다 코드·질의응답 전용 엔진을 선택한다.
+        local_category = ("science" if category in ("science", "publication") else
+                          "news" if category == "news" else "general")
+        result = searxng_search.search(
+            args["query"], args["count"], self.searxng_url,
+            category=local_category, include_domains=args["domains"],
+            time_range=None if args["time_range"] == "week" else args["time_range"],
+            language=args["language"],
+            cancel_event=cancel_event,
+        )
+        if args["published_after"]:
+            result["note"] += " Exact published_after filtering is not supported by the local fallback."
+        if args["time_range"] == "week":
+            result["note"] += " The weekly time window is not applied by the local fallback."
+        return result
+
     def _search(self, args: dict, cancel_event=None) -> dict:
         if cancel_event is not None and cancel_event.is_set():
             raise WebSearchError("search cancelled before dispatch")
         ledger = self._usage()
         fallbacks: list[str] = []
+        local_result: dict | None = None
+        local_attempted = False
+
+        if self.searxng_url and self._local_first():
+            local_attempted = True
+            try:
+                ledger.reserve_searxng(cancel_event=cancel_event)
+                local_result = self._searxng_attempt(args, cancel_event)
+            except searxng_search.SearXNGSearchError as exc:
+                if exc.cooldown_seconds:
+                    ledger.set_cooldown("searxng", exc.cooldown_seconds, "search_engine_unavailable")
+                if not self._has_api_backup():
+                    raise WebSearchError(str(exc)) from None
+                fallbacks.append("Local SearXNG failure")
+            except UsageLedgerError as exc:
+                if not self._has_api_backup():
+                    raise WebSearchError(str(exc)) from None
+                fallbacks.append(str(exc))
+            if local_result is not None:
+                if local_result.get("results") or not self._has_api_backup():
+                    local_result["route"] = ["Local SearXNG"]
+                    return local_result
+                fallbacks.append("No results in local SearXNG")
 
         if self.exa_api_key:
             remaining, _reason = ledger.cooldown("exa")
@@ -208,7 +260,7 @@ class WebSearchRouter:
                         if (isinstance(actual_cost, (int, float)) and not isinstance(actual_cost, bool)
                                 and actual_cost > EXA_RESERVATION_CENTS / 100):
                             ledger.mark_month_exhausted("exa", "cost_above_local_reservation")
-                        result["route"] = ["Exa"]
+                        result["route"] = (["Exa"] if not fallbacks else [*fallbacks, "Exa"])
                         return result
                     except exa_search.ExaSearchError as exc:
                         if not exc.fallback_allowed:
@@ -258,25 +310,14 @@ class WebSearchRouter:
                 else:
                     fallbacks.append(self._explain(reason, "Tavily"))
 
-        if self.searxng_url:
+        if self.searxng_url and not local_attempted:
+            # API-first order (WEB_SEARCH_ORDER=api): local search stays last,
+            # exactly as before. The local-first pass already ran when
+            # local_attempted is set, so a failed local query is not re-run.
             try:
                 ledger.reserve_searxng(cancel_event=cancel_event)
-                category = args["category"]
-                # SearXNG의 it 분류는 공식 문서보다 코드·질의응답 전용 엔진을 선택한다.
-                local_category = ("science" if category in ("science", "publication") else
-                                  "news" if category == "news" else "general")
-                result = searxng_search.search(
-                    args["query"], args["count"], self.searxng_url,
-                    category=local_category, include_domains=args["domains"],
-                    time_range=None if args["time_range"] == "week" else args["time_range"],
-                    language=args["language"],
-                    cancel_event=cancel_event,
-                )
+                result = self._searxng_attempt(args, cancel_event)
                 result["route"] = (["Local SearXNG"] if not fallbacks else [*fallbacks, "Local SearXNG"])
-                if args["published_after"]:
-                    result["note"] += " Exact published_after filtering is not supported by the local fallback."
-                if args["time_range"] == "week":
-                    result["note"] += " The weekly time window is not applied by the local fallback."
                 return result
             except searxng_search.SearXNGSearchError as exc:
                 if exc.cooldown_seconds:
@@ -284,6 +325,12 @@ class WebSearchRouter:
                 raise WebSearchError(str(exc)) from None
             except UsageLedgerError as exc:
                 raise WebSearchError(str(exc)) from None
+
+        if local_result is not None:
+            # Local-first found nothing and no API backup answered; an empty
+            # result is still the honest search answer, so return it as-is.
+            local_result["route"] = [*fallbacks, "Local SearXNG"]
+            return local_result
 
         if not fallbacks:
             raise WebSearchError(

@@ -1,11 +1,76 @@
 """Offline contracts for SearXNG results when an engine ignores site filters."""
 import io
 import json
+import os
 import unittest
 from unittest.mock import Mock, patch
 from urllib.parse import parse_qs, urlsplit
 
 from tools.claude_mcp import searxng_search, web_search_router
+
+
+class LocalFirstRoutingTests(unittest.TestCase):
+    """Local-first order: SearXNG first; free APIs spend only on failure or no results."""
+
+    def router(self, exa=True, tavily=False):
+        ledger = Mock()
+        ledger.cooldown.return_value = (None, None)
+        ledger.reserve_monthly.return_value = (True, 1, None)
+        return web_search_router.WebSearchRouter(
+            exa_api_key='exa-key' if exa else None,
+            tavily_api_key='tavily-key' if tavily else None,
+            searxng_url='http://127.0.0.1:8888', ledger=ledger)
+
+    def test_local_first_queries_searxng_before_exa(self):
+        router = self.router()
+        with patch.dict(os.environ, {'WEB_SEARCH_ORDER': 'local'}), \
+                patch.object(searxng_search, 'search',
+                             return_value={'results': [{'url': 'https://a/'}], 'note': ''}) as local, \
+                patch.object(web_search_router.exa_search, 'search') as exa:
+            result = router._search(web_search_router._validate({'query': 'release docs'}))
+        self.assertEqual(result['route'], ['Local SearXNG'])
+        local.assert_called_once()
+        exa.assert_not_called()
+        router.ledger.reserve_monthly.assert_not_called()
+
+    def test_zero_local_results_fall_through_to_exa_with_reason(self):
+        router = self.router()
+        with patch.dict(os.environ, {'WEB_SEARCH_ORDER': 'local'}), \
+                patch.object(searxng_search, 'search', return_value={'results': [], 'note': ''}), \
+                patch.object(web_search_router.exa_search, 'search',
+                             return_value={'results': [{'title': 'x', 'url': 'https://e/'}]}):
+            result = router._search(web_search_router._validate({'query': 'release docs'}))
+        self.assertEqual(result['route'], ['No results in local SearXNG', 'Exa'])
+
+    def test_local_failure_falls_through_to_exa(self):
+        router = self.router()
+        with patch.dict(os.environ, {'WEB_SEARCH_ORDER': 'local'}), \
+                patch.object(searxng_search, 'search',
+                             side_effect=searxng_search.SearXNGSearchError('engine unavailable',
+                                                                           cooldown_seconds=60)), \
+                patch.object(web_search_router.exa_search, 'search',
+                             return_value={'results': [{'title': 'x', 'url': 'https://e/'}]}):
+            result = router._search(web_search_router._validate({'query': 'release docs'}))
+        self.assertEqual(result['route'], ['Local SearXNG failure', 'Exa'])
+        router.ledger.set_cooldown.assert_called_once_with('searxng', 60, 'search_engine_unavailable')
+
+    def test_api_order_keeps_exa_first(self):
+        router = self.router()
+        with patch.dict(os.environ, {'WEB_SEARCH_ORDER': 'api'}), \
+                patch.object(searxng_search, 'search') as local, \
+                patch.object(web_search_router.exa_search, 'search',
+                             return_value={'results': [{'title': 'x', 'url': 'https://e/'}]}):
+            result = router._search(web_search_router._validate({'query': 'release docs'}))
+        self.assertEqual(result['route'], ['Exa'])
+        local.assert_not_called()
+
+    def test_zero_local_results_without_api_keys_return_empty_not_error(self):
+        router = self.router(exa=False)
+        with patch.dict(os.environ, {'WEB_SEARCH_ORDER': 'local'}), \
+                patch.object(searxng_search, 'search', return_value={'results': [], 'note': ''}):
+            result = router._search(web_search_router._validate({'query': 'release docs'}))
+        self.assertEqual(result['results'], [])
+        self.assertEqual(result['route'], ['Local SearXNG'])
 
 
 class SearXNGDomainTests(unittest.TestCase):
