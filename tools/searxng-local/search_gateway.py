@@ -42,15 +42,14 @@ class Handler(BaseHTTPRequestHandler):
             return
         results = []
         for item in (data.get("results") or [])[:MAX_RESULTS]:
-            content = item.get("content") or ""
+            # The desktop custom contract reads title/url/snippet (snippet
+            # truncated at 600 chars); SearXNG names the same text "content".
+            snippet = (item.get("content") or "")[:600]
             results.append(
                 {
                     "title": item.get("title") or "",
                     "url": item.get("url") or "",
-                    # SearXNG calls the snippet "content"; Brave calls it
-                    # "description". Emit both so either reader is satisfied.
-                    "content": content,
-                    "description": content,
+                    "snippet": snippet,
                 }
             )
         payload = {"results": results}
