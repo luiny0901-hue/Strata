@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import sqlite3
 import time
+from http.client import HTTPException as _HTTPProtocolError
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlsplit, urlunsplit
 from urllib.robotparser import RobotFileParser
@@ -116,7 +117,7 @@ def _fetch(url: str, source: dict, *, limit: int) -> tuple[bytes, str, str]:
         status = exc.code
         exc.close()
         raise LocalDocsIndexError(f"문서 출처가 HTTP {status}를 반환했습니다.") from None
-    except (URLError, TimeoutError, OSError):
+    except (URLError, TimeoutError, OSError, _HTTPProtocolError):
         raise LocalDocsIndexError("문서 출처에 연결하지 못했습니다.") from None
 
 
