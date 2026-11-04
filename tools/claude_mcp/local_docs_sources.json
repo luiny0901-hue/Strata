@@ -4,9 +4,9 @@
     {
       "id": "unity-manual",
       "name": "Unity Manual",
-      "host": "docs.unity3d.com",
-      "path_contains": ["/manual/", "/documentation/manual/"],
-      "seed_urls": ["https://docs.unity3d.com/Manual/index.html"]
+      "host": "docs.unity.com",
+      "path_contains": ["/en-us/"],
+      "seed_urls": ["https://docs.unity.com/en-us/engine/current/manual"]
     },
     {
       "id": "unreal-engine",
