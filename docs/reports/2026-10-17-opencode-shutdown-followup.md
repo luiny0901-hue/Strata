@@ -45,7 +45,7 @@ long-project checkpoints, scoped discovery, loop stopping, and Korean replies.
   request was sent. No model assets, operational profile, or GPU power setting
   was modified.
 
-See [the setup instructions](../IQ4XS_NVFP4_OPENCODE_SETUP.md) for the
+See [the setup instructions](../IQ4XS_NVFP4_STRATA_SETUP.md) for the
 re-installation flow. The detailed prior run log remains at
 `C:\Users\luiny\AppData\Local\Strata\validation\opencode-multifile-ab-20261017\RESULTS.md`
 on the original PC and is not required for reinstalling the documented setup.
