@@ -1,7 +1,9 @@
 """Sustained single-owner restart/cancel/status/log soak using CPU-only HTTP children."""
 import argparse
+import ctypes
 from http.server import ThreadingHTTPServer
 import json
+import os
 from pathlib import Path
 import statistics
 import sys
@@ -12,7 +14,32 @@ from urllib.request import Request,urlopen
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from tools.strata_server_supervisor import Supervisor,BoundedLog,control_handler,publish
 from tools.test_strata_server_supervisor import FIXTURE,free_port
-from tools.test_autonomy_soak import resources
+
+
+def resources(process_handle=None):
+    # Moved here from tools/test_autonomy_soak.py when that soak was retired (977b569b);
+    # this module is its only consumer.
+    result={'threads':threading.active_count()} if process_handle is None else {}
+    if os.name=='nt':
+        from ctypes import wintypes
+        kernel=ctypes.WinDLL('kernel32',use_last_error=True)
+        kernel.GetCurrentProcess.restype=wintypes.HANDLE
+        kernel.GetProcessHandleCount.argtypes=[wintypes.HANDLE,ctypes.POINTER(wintypes.DWORD)]
+        count=wintypes.DWORD()
+        handle=kernel.GetCurrentProcess() if process_handle is None else process_handle
+        if kernel.GetProcessHandleCount(handle,ctypes.byref(count)):
+            result['handles']=count.value
+        class Counters(ctypes.Structure):
+            _fields_=[('cb',wintypes.DWORD),('faults',wintypes.DWORD)]+[(name,ctypes.c_size_t) for name in
+                ('peak_working','working','peak_paged','paged','peak_nonpaged','nonpaged','pagefile','peak_pagefile','private')]
+        info=Counters();info.cb=ctypes.sizeof(info)
+        psapi=ctypes.WinDLL('psapi',use_last_error=True)
+        psapi.GetProcessMemoryInfo.argtypes=[wintypes.HANDLE,ctypes.c_void_p,wintypes.DWORD]
+        if psapi.GetProcessMemoryInfo(handle,ctypes.byref(info),info.cb):
+            result.update(private_bytes=info.private,working_set_bytes=info.working)
+    elif process_handle is None and Path('/proc/self/fd').exists():
+        result['fds']=len(list(Path('/proc/self/fd').iterdir()))
+    return result
 
 
 def main():
