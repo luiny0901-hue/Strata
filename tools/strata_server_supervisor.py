@@ -91,6 +91,9 @@ class BoundedLog:
                     tail=stream.read(max_bytes)
                     stream.seek(0);stream.write(tail);stream.truncate()
         self.stream = path.open('ab',buffering=0)
+        # Newest bytes stay in memory so an early child death can be named from
+        # them even after the on-disk file rotates.
+        self.tail = bytearray()
 
     def rotate(self):
         self.stream.close()
@@ -105,6 +108,9 @@ class BoundedLog:
 
     def write(self, data):
         with self.lock:
+            self.tail += data
+            if len(self.tail) > 4096:
+                del self.tail[:-4096]
             offset=0
             while offset<len(data):
                 space=self.max_bytes-self.stream.tell()
@@ -310,10 +316,33 @@ class Supervisor:
         except OSError:
             return False
 
+    def child_exit_reason(self):
+        """The launcher's own one-line failure (an 'error:' line) from the log tail, if it printed one."""
+        thread = getattr(self.process, 'output_thread', None)
+        if isinstance(thread, threading.Thread):
+            thread.join(timeout=2)   # let the drained pipe deliver its last lines first
+        tail = getattr(getattr(self.process, 'log', None), 'tail', None)
+        if not tail:
+            return None
+        for line in reversed(bytes(tail).decode('utf-8', 'replace').splitlines()):
+            if 'error:' in line or 'Error:' in line:
+                return line.strip()[-200:]
+        return None
+
     def wait_ready(self):
         deadline = time.monotonic() + self.ready_timeout
         while time.monotonic() < deadline and not self.stopping.is_set():
             if not self.process.alive():
+                # Name the real failure when the launcher or a port race explains it;
+                # a bare "exited; see server.log" made a normal double-start collision
+                # look like a crash.
+                reason = self.child_exit_reason()
+                if reason:
+                    raise RuntimeError('Owned server launcher exited: '+reason+' (see server.log)')
+                if self.port_open():
+                    raise RuntimeError('Owned server launcher exited while another server answered on '
+                                       +self.server_url+'; another start won the port or a previous server '
+                                       'was still closing. Keep that server or stop it first. See server.log.')
                 raise RuntimeError('Owned server launcher exited; see server.log')
             if self.process.log_error:
                 raise RuntimeError('Cannot persist server log: '+self.process.log_error)
@@ -764,6 +793,10 @@ def main():
                     raise RuntimeError('Owned server exited; automatic crash/restart loops are disabled')
         except KeyboardInterrupt:
             pass
+        except RuntimeError as exc:
+            # Curated lifecycle failures print one line (the same idiom as the
+            # control-port message); unexpected errors keep their traceback.
+            raise SystemExit('Managed Strata stopped: '+str(exc)) from None
         finally:
             supervisor.stopping.set()
             if supervisor.update_worker:

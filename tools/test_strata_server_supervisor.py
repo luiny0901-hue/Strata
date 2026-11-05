@@ -189,6 +189,45 @@ class SupervisorTests(unittest.TestCase):
                 self.supervisor.start()
         self.assertFalse(self.supervisor.process.alive())
 
+    def starting_child(self,name,body,ready_timeout=5):
+        script=self.root/name
+        script.write_text(body,encoding='utf-8')
+        supervisor=Supervisor(self.root,[sys.executable,str(script),str(free_port())],'',
+            self.root/'key','fixture',ready_timeout=ready_timeout)
+        supervisor.server_url='http://127.0.0.1:'+supervisor.process.command[-1]
+        self.addCleanup(supervisor.log.close)
+        return supervisor
+
+    def test_launcher_error_line_names_an_exited_child(self):
+        # A double-start collision must surface the launcher's own reason, not a bare exit.
+        supervisor=self.starting_child('fails.py',
+            'import sys\nprint("python.exe -m serve.server: error: port 8080 is already in use - fixture",flush=True)\nsys.exit(2)\n')
+        try:
+            with self.assertRaisesRegex(RuntimeError,'already in use'):
+                supervisor.start()
+        finally:
+            supervisor.log.close()   # release the file before tearDown removes the directory
+
+    def test_silent_child_death_on_an_occupied_port_names_the_collision(self):
+        supervisor=self.starting_child('quiet.py','import sys\nsys.exit(3)\n')
+        try:
+            # The port was free for start()'s check and taken by the time wait_ready noticed.
+            with patch.object(supervisor,'port_open',side_effect=[False,True]):
+                with self.assertRaisesRegex(RuntimeError,'another server answered'):
+                    supervisor.start()
+        finally:
+            supervisor.log.close()
+
+    def test_log_tail_keeps_the_newest_bytes_through_rotation(self):
+        log=BoundedLog(self.root/'tail.log',max_bytes=1024,backups=1)
+        try:
+            log.write(b'x'*900+b'error: port 8080 is already in use - fixture\n')
+            log.write(b'y'*1500)
+            self.assertLessEqual(len(log.tail),4096)
+            self.assertTrue(log.tail.endswith(b'y'*1500))
+        finally:
+            log.close()
+
     def test_cancel_after_stop_restores_service_without_agent_resume(self):
         with patch.object(self.supervisor,'api',return_value=[{'is_processing':False}]), \
              patch.object(self.supervisor,'port_open',return_value=False), \
