@@ -90,6 +90,34 @@ class ClientSettingsTests(unittest.TestCase):
         self.assertEqual(saved['env']['ANTHROPIC_DEFAULT_OPUS_MODEL'], 'claude-fixture-5')
         self.assertEqual(saved['env']['ANTHROPIC_DEFAULT_HAIKU_MODEL'], 'other/model')  # foreign selection preserved
 
+    def test_switch_replaces_the_previous_routes_wire_name_left_in_cli_env(self):
+        # Regression: an earlier sync wrote the then-current wire name into the CLI env.
+        # On a later switch that residue matched neither the provider id nor the new
+        # wire name, so it stayed forever; the gateway-rendered names of the other
+        # Strata routes now close that match set.
+        self.settings['env'].update(ANTHROPIC_MODEL='claude-fixture-5',
+                                    ANTHROPIC_SMALL_FAST_MODEL='strata/test',
+                                    ANTHROPIC_DEFAULT_HAIKU_MODEL='other/model')
+        self.write('.claude/settings.json', self.settings)
+        runtime = {'model': 'test', 'context': 1048576, 'max_output_tokens': 32000,
+                   'base_url': 'http://127.0.0.1:8080/v1', 'images': True, 'api_key': 'private-fixture'}
+
+        def editor(home, base, route, **kwargs):
+            data = clients.shared.read_json(home/'.opencodex/config.json')
+            data['providers']['strata'] = kwargs['body']['provider']
+            self.write('.opencodex/config.json', data)
+            return {'success': True}, None
+        with patch.object(clients, 'runtime_metadata', return_value=runtime), \
+                patch.object(clients.shared, 'management_json', side_effect=editor), \
+                patch.object(clients, 'sync_desktop_context',
+                             return_value={'wire_model': 'claude-fixture-6',
+                                           'other_strata_wires': ['claude-fixture-5']}):
+            clients.sync_runtime(self.home)
+        saved = clients.shared.read_json(self.home/'.claude/settings.json')
+        self.assertEqual(saved['env']['ANTHROPIC_MODEL'], 'claude-fixture-6')
+        self.assertEqual(saved['env']['ANTHROPIC_SMALL_FAST_MODEL'], 'claude-fixture-6')
+        self.assertEqual(saved['env']['ANTHROPIC_DEFAULT_HAIKU_MODEL'], 'other/model')
+
     def test_runtime_switch_reads_actual_model_port_output_and_small_context(self):
         self.settings['env'].update(ANTHROPIC_MODEL='strata/test',
                                    ANTHROPIC_DEFAULT_SONNET_MODEL='another/model')
@@ -293,7 +321,9 @@ class ClientSettingsTests(unittest.TestCase):
         self.write('library/'+selected+'.json', profile)
         def editor(home, base, route, **kwargs):
             if route == '/api/claude-desktop':
-                return {'rendered': [{'route': 'strata/new', 'name': 'new-wire-model', 'supports1m': False}]}, None
+                return {'rendered': [{'route': 'strata/new', 'name': 'new-wire-model', 'supports1m': False},
+                                     {'route': 'strata/old', 'name': 'old-wire-model', 'supports1m': True},
+                                     {'route': 'other/model', 'name': 'foreign-route-wire'}]}, None
             profile['inferenceModels'].append({'name': 'new-wire-model'})
             self.write('library/'+selected+'.json', profile)
             return {'applied': True}, None
@@ -302,6 +332,7 @@ class ClientSettingsTests(unittest.TestCase):
             result = clients.sync_desktop_context(self.home, 'http://127.0.0.1:10100', 'strata/new')
         self.assertTrue(result['changed'])
         self.assertEqual(send.call_count, 2)
+        self.assertEqual(result['other_strata_wires'], ['old-wire-model'])
 
     def test_provider_editor_changes_only_the_strata_provider(self):
         path = self.home/'.opencodex/config.json'

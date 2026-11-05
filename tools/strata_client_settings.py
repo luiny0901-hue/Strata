@@ -237,6 +237,13 @@ def sync_desktop_context(home, base, model, *, timeout=60):
     row = next((r for r in state.get('rendered', []) if r.get('route') == model), None)
     if not row or not isinstance(row.get('name'), str):
         raise ValueError('현재 Desktop 프로필에서 Strata 경로를 찾지 못했습니다.')
+    # Wire names of the gateway's other Strata routes: this projection wrote the
+    # previous route's name into the CLI env, so a model switch can only repair
+    # those keys by recognizing the name of the route it previously wrote.
+    other = sorted({r.get('name') for r in state.get('rendered', [])
+                    if isinstance(r, dict) and isinstance(r.get('route'), str)
+                    and r['route'].startswith('strata/') and r['route'] != model
+                    and isinstance(r.get('name'), str)})
     saved = next((r for r in profile.get('inferenceModels', []) if r.get('name') == row['name']), {})
     desired = row.get('supports1m') is True
     changed = not saved or bool(saved.get('supports1m')) != desired or bool(saved.get('prefer1m')) != desired
@@ -251,7 +258,7 @@ def sync_desktop_context(home, base, model, *, timeout=60):
         if not saved or bool(saved.get('supports1m')) != desired or bool(saved.get('prefer1m')) != desired:
             raise ValueError('저장된 Desktop 1M 표시가 실제 모델 정보와 다릅니다.')
     return {'status': 'new_desktop_session_required', 'wire_model': row['name'],
-            'supports_1m': desired, 'changed': changed}
+            'other_strata_wires': other, 'supports_1m': desired, 'changed': changed}
 
 
 def sync_context(home, *, runtime=None):
@@ -333,11 +340,15 @@ def sync_context(home, *, runtime=None):
         if claude_selected and isinstance(desktop.get('wire_model'), str) and desktop['wire_model']:
             # Claude validates model names itself: the CLI env carries the gateway-known
             # wire name (the gateway maps it to Strata); settings.model keeps the provider id.
+            # A value written by an earlier switch is the previous route's wire name, so
+            # the match set joins the other rendered Strata names; other-model values
+            # are never rendered names and stay untouched.
             wire = desktop['wire_model']
+            aliases = {model, wire, *(desktop.get('other_strata_wires') or ())}
             for name in ('ANTHROPIC_MODEL', 'ANTHROPIC_SMALL_FAST_MODEL', 'CLAUDE_CODE_SUBAGENT_MODEL',
                          'ANTHROPIC_CUSTOM_MODEL_OPTION', 'ANTHROPIC_DEFAULT_OPUS_MODEL',
                          'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL'):
-                if env.get(name) in (model, wire):
+                if env.get(name) in aliases:
                     env[name] = wire
             files[path] = json.dumps(settings, ensure_ascii=False, indent=2)+'\n'
         phase = 'local_settings'
