@@ -230,7 +230,7 @@ class ForkUpdateTests(unittest.TestCase):
             profile = u.read(output)
             self.assertEqual(Path(profile['exe'].replace('\\', '/')).parent.parent, new)
             self.assertIn('262144', profile['args'])
-            self.assertIn('448', profile['args'])
+            self.assertIn('768', profile['args'])
 
     @unittest.skipUnless(os.name == 'nt', 'Windows CMD quoting')
     def test_actual_cmd_launcher_resolves_pointer_with_spaces_without_starting_server(self):
