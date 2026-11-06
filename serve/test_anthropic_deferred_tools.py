@@ -1,8 +1,10 @@
-"""Anthropic client-owned tool search must not render the deferred catalog."""
+"""Anthropic client-owned tool search: the deferred catalog stays out of the tool list, and a used definition stays
+reachable. #4663 renders each tool_reference where it stands; anthropic_tool_cache_prompt retains a definition whose
+search result a compaction trimmed (the projection tests)."""
 import copy
 import unittest
 
-from serve.frontend import anthropic_to_messages, openai_to_messages
+from serve.frontend import anthropic_to_messages, anthropic_tool_cache_prompt, anthropic_tools, openai_to_messages
 
 
 class DeferredToolsTests(unittest.TestCase):
@@ -27,14 +29,21 @@ class DeferredToolsTests(unittest.TestCase):
         self.request['messages'].append({'role':'user', 'content':[
             {'type':'tool_result', 'tool_use_id':'search-1', 'content':[
                 {'type':'tool_reference', 'tool_name':'mcp__rea__analyze'}]}]})
-        _, tools, _ = anthropic_to_messages(self.request)
-        self.assertIn('mcp__rea__analyze', {tool['name'] for tool in tools})
+        messages, tools, _ = anthropic_to_messages(self.request)
+        self.assertNotIn('mcp__rea__analyze', {tool['name'] for tool in tools})   # the header never changes
+        self.assertIn('mcp__rea__analyze', ' '.join(str(m.get('content')) for m in messages))  # rendered in place
+        self.assertIn('mcp__rea__analyze', {tool['name'] for tool in anthropic_tools(self.request)[0]})
 
     def test_prior_tool_use_remains_available_without_original_search_result(self):
         self.request['messages'].append({'role':'assistant', 'content':[
             {'type':'tool_use', 'id':'call-1', 'name':'mcp__rea__analyze', 'input':{}}]})
-        _, tools, _ = anthropic_to_messages(self.request)
-        self.assertIn('mcp__rea__analyze', {tool['name'] for tool in tools})
+        messages, tools, _ = anthropic_to_messages(self.request)
+        self.assertNotIn('mcp__rea__analyze', {tool['name'] for tool in tools})
+        self.assertIn('mcp__rea__analyze', {tool['name'] for tool in anthropic_tools(self.request)[0]})
+        # once the search result that carried the definition is compacted away, the opt-in projection keeps the
+        # definition in the header so the model can keep calling the tool
+        shown = anthropic_tool_cache_prompt(self.request, messages, tools)[1]
+        self.assertIn('mcp__rea__analyze', {tool['name'] for tool in shown})
 
     def test_a_quoted_name_does_not_activate_a_deferred_definition(self):
         self.request['messages'][0]['content'] = 'mcp__rea__analyze'

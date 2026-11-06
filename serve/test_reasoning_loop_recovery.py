@@ -194,6 +194,7 @@ class ReasoningLoopRecovery(unittest.TestCase):
     def test_recovery_works_with_medium_effort_and_no_native_hint(self):
         engine = RecordingEngine(self.tok, [self.loop])
         service = Service(engine, self.tok, None)
+        service.answer_room = False      # these cases test the loop guards at the cap itself
         service.reasoning_loop_recovery = True
         ids = self.tok.encode('<|im_start|>system\nAgent instructions.\n<|im_end|>\n'
             '<|im_start|>user\nTask<|im_end|>\n', parse_special=True)

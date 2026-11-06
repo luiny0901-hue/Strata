@@ -714,48 +714,34 @@ def anthropic_to_messages(req: dict, think_unasked: bool = True) -> tuple[list[d
 
 
 def anthropic_tool_cache_prompt(req: dict, messages: list[dict], tools: list[dict] | None):
-    """Opt-in prompt projection for client-owned ToolSearch, without changing callable tools.
+    """Opt-in companion to #4663 for clients whose history compaction drops the ToolSearch result.
 
-    Keep eager definitions in the stable header and put selected deferred definitions beside their first visible
-    tool_reference. Parser/forced-call validation still receives the original `tools`. If a compacted history only
-    retains tool_use, keep that definition in the header rather than hiding it. No process/session cache is needed.
+    The base conversion already renders each tool_reference where it stands (the tool list, and with it the prompt's
+    start, never changes). This projection adds one retention step: a deferred tool the conversation has already
+    called but whose `tool_reference` a compaction removed keeps its definition in the header, so the model can go
+    on writing calls for a tool whose search result the client trimmed away. Parser/forced-call validation still
+    receives the original `tools`. Ambiguous duplicate names leave the prompt as it is. No process/session cache.
     """
-    if not tools:
+    declared = _tool_list(req.get('tools'), None)
+    deferred = {t['name']: _anthropic_tool(t) for t in declared if t.get('defer_loading') is True}
+    if not deferred or len({t['name'] for t in declared}) != len(declared):
         return messages, tools
-    if len({t['name'] for t in tools}) != len(tools):
-        return messages, tools
-    deferred = {t['name'] for t in _tool_list(req.get('tools'), None) if t.get('defer_loading') is True}
-    selected = {t['name']: t for t in tools if t['name'] in deferred}
-    # The stable header must retain the template's function-call instructions.
-    if not selected or not any(t['name'] not in selected for t in tools):
-        return messages, tools
-    results = [block for m in _object_list(req.get('messages'), 'messages')
-               for block in (m.get('content') if isinstance(m.get('content'), list) else [])
-               if isinstance(block, dict) and block.get('type') == 'tool_result']
-    positions = [i for i, m in enumerate(messages) if m.get('role') == 'tool']
-    if len(results) != len(positions):
-        return messages, tools
-    projected, moved = list(messages), set()
-    for block, index in zip(results, positions):
-        names = []
-        for part in block.get('content') if isinstance(block.get('content'), list) else []:
-            if not isinstance(part, dict) or part.get('type') != 'tool_reference':
+    referenced: set[str] = set()
+    for m in _object_list(req.get('messages'), 'messages'):
+        for block in (m.get('content') if isinstance(m.get('content'), list) else []):
+            if not isinstance(block, dict) or block.get('type') != 'tool_result':
                 continue
-            name = part.get('tool_name')
-            if isinstance(name, str) and name in selected and name not in moved:
-                names.append(name)
-                moved.add(name)
-        if not names:
-            continue
-        text = ('ToolSearch loaded these function definitions. Use the same function-call format as the tools above:\n'
-                + '\n'.join(json.dumps(selected[name], ensure_ascii=False) for name in names))
-        message = messages[index]
-        content = message.get('content')
-        content = [*content, {'type': 'text', 'text': text}] if isinstance(content, list) else (content or '') + '\n' + text
-        projected[index] = {**message, 'content': content}
-    if not moved:
-        return messages, tools
-    return projected, [t for t in tools if t['name'] not in moved]
+            for part in (block.get('content') if isinstance(block.get('content'), list) else []):
+                if isinstance(part, dict) and part.get('type') == 'tool_reference' \
+                        and isinstance(part.get('tool_name'), str):
+                    referenced.add(part['tool_name'])
+    used = {block.get('name') for m in _object_list(req.get('messages'), 'messages')
+            for block in (m.get('content') if isinstance(m.get('content'), list) else [])
+            if isinstance(block, dict) and block.get('type') == 'tool_use' and isinstance(block.get('name'), str)}
+    retained = [deferred[name] for name in sorted(deferred.keys() & (used - referenced))]
+    if not retained:
+        return messages, tools                       # every used definition is still visible in place
+    return messages, [*(tools or []), *retained]
 
 
 # ------------------------------------------------------------------------------------------------ output parser

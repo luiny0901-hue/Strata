@@ -131,7 +131,9 @@ class CompactionHttp(unittest.TestCase):
         response = self.post('/v1/messages', req)
         self.assertGreater(count, before)
         self.assertEqual(count, expected)
-        self.assertEqual(response['usage']['input_tokens'], count)
+        usage = response['usage']   # the delta reports the prompt split over the Anthropic cache fields
+        self.assertEqual(usage['input_tokens'] + usage.get('cache_creation_input_tokens', 0)
+                         + usage.get('cache_read_input_tokens', 0), count)
         req['messages'][-1]['content'] = 'Ordinary work.'
         after = self.post('/v1/messages/count_tokens', req)['input_tokens']
         self.svc.anthropic_compact_summary = False

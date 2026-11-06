@@ -43,12 +43,13 @@ class ToolCacheProjection(unittest.TestCase):
     def test_selected_schema_moves_but_callable_tools_and_original_input_are_preserved(self):
         req=request(); original=copy.deepcopy(req)
         messages,tools,projected,shown,_=project(req)
-        self.assertEqual({t['name'] for t in tools},{'ToolSearch',NAME})
-        self.assertEqual([t['name'] for t in shown],['ToolSearch'])
-        self.assertNotIn(NAME,json.dumps(messages))
-        self.assertIn(NAME,projected[-1]['content'])
-        self.assertIn('Search result.',projected[-1]['content'])
-        self.assertNotIn('UNSELECTED_CATALOG',json.dumps(projected))
+        self.assertEqual([t['name'] for t in tools],['ToolSearch'])        # the header never lists a deferred tool
+        self.assertIs(projected,messages)                                  # rendered where it was loaded, already
+        self.assertIs(shown,tools)
+        content=projected[-1]['content']
+        self.assertIn(NAME, content)
+        self.assertIn('Search result.',content)
+        self.assertNotIn('UNSELECTED_CATALOG',json.dumps(projected)+json.dumps(shown))
         self.assertEqual(req,original)
 
     def test_long_prefix_is_identical_when_search_adds_a_definition(self):
@@ -64,17 +65,21 @@ class ToolCacheProjection(unittest.TestCase):
         req=request()
         req['messages'].append(copy.deepcopy(req['messages'][-1]))
         _,_,messages,_,_=project(req)
-        self.assertEqual(json.dumps(messages).count('Return a bounded count.'),1)
+        # each tool_reference carries its own definition at the place it stands (#4663): two results, two renders,
+        # and the projection adds nothing on top of them
+        self.assertEqual(json.dumps(messages).count('Return a bounded count.'),2)
 
     def test_images_and_text_beside_references_are_preserved(self):
         req=request()
         req['messages'][-1]['content'][0]['content'].append(
             {'type':'image','source':{'type':'url','url':'https://example.test/image.png'}})
         messages,_,projected,_,_=project(req)
-        before=next(m for m in messages if m['role']=='tool')['content']
-        after=next(m for m in projected if m['role']=='tool')['content']
-        self.assertEqual(after[:-1],before)
-        self.assertIn(NAME,after[-1]['text'])
+        self.assertIs(projected,messages)                  # the projection adds nothing beside a rendered reference
+        tool=next(m for m in projected if m['role']=='tool')
+        content=json.dumps(tool['content'])
+        self.assertIn('Search result.',content)            # the result's own text stays
+        self.assertIn(NAME,content)                        # the loaded definition stands with it
+        self.assertIn('image.png',content)                 # the picture beside the reference is not dropped
 
     def test_compaction_without_reference_keeps_prior_used_definition_in_header(self):
         req=request()
@@ -82,8 +87,9 @@ class ToolCacheProjection(unittest.TestCase):
             {'type':'tool_use','id':'call-1','name':NAME,'input':{'limit':2}}]}]
         messages,tools,projected,shown,_=project(req)
         self.assertIs(messages,projected)
-        self.assertIs(tools,shown)
-        self.assertIn(NAME,{t['name'] for t in shown})
+        self.assertNotIn(NAME,{t['name'] for t in tools})   # the base conversion lists no deferred tool
+        self.assertIn(NAME,{t['name'] for t in shown})      # the projection keeps a used one in the header
+        self.assertNotIn('UNSELECTED_CATALOG',json.dumps(shown))
 
     def test_updated_or_revoked_schema_is_not_retained_in_a_process_cache(self):
         req=request()
@@ -154,7 +160,9 @@ class ToolCacheHttp(unittest.TestCase):
         req=request()
         count=self.post('/v1/messages/count_tokens',req)['input_tokens']
         response=self.post('/v1/messages',req)
-        self.assertEqual(response['usage']['input_tokens'],count)
+        usage=response['usage']   # the delta reports the prompt split over the Anthropic cache fields
+        self.assertEqual(usage['input_tokens']+usage.get('cache_creation_input_tokens',0)
+                         +usage.get('cache_read_input_tokens',0),count)
         calls=[c for c in response['content'] if c['type']=='tool_use']
         self.assertEqual(len(calls),1)
         self.assertEqual(calls[0]['name'],NAME)
