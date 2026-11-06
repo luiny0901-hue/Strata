@@ -127,10 +127,14 @@ def validate_templates(repository_root: Path) -> list[str]:
         # On the 3090 Ti box 448 left 357 MiB of VRAM free at load and prefill died
         # of an illegal memory access under WDDM paging (#2065). Free at load equals
         # 357 + (reserve - 448); a 2026-11-01 sweep crashed at 549 MiB free and
-        # passed 2/2 at 679 (this value), accepting the engine's below-1024 note at
-        # request start. Measured details: docs/STRATA_1M_CONTEXT_KO.md.
-        assert args[args.index("--vram-reserve-mib") + 1] == "768"
-        assert args[args.index("--prefill") + 1] == "auto:8192"
+        # passed at 679. A 2026-11-07 paired pass measured auto:16384 at +10.8% on
+        # a 146,798-token cold read, and the read rate was the same at every reserve
+        # from 512 to 1216, so the 16384 chunk returns with the margin at 1216
+        # (1,123 MiB free at load; the engine's below-1024 note can still show when
+        # the desktop grows - expected, like the 768 note in the 2026-11-01 record).
+        # Measured details: docs/STRATA_1M_CONTEXT_KO.md.
+        assert args[args.index("--vram-reserve-mib") + 1] == "1216"
+        assert args[args.index("--prefill") + 1] == "auto:16384"
         for option, expected_cache in (
             ("--conversation-cache-mib", "8192"),
             ("--conversation-cache-slots", "2"),
