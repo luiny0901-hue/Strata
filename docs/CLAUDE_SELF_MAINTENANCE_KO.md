@@ -33,6 +33,12 @@ Desktop의 `ccd_*`·Claude Browser·terminal·scheduled-tasks는 앱이 제공�
 
 `strata-maintenance.environment_status`는 기본 호출에서 기존 Strata·OpenCodex 상태만 조회하며 요청 로그용 CLI 프로세스를 시작하지 않는다. 요청 원인·지연을 확인해야 할 때만 `include_opencodex_requests=true`와 `request_window=15m` 또는 `1h`를 전달한다. 이 경로는 기록된 Bun/CLI 소유자를 사용해 Claude 표본 최대 12건을 읽으며 8초 제한과 stdout 128 KiB 스트리밍 상한을 적용한다. 허용된 시간·상태·effort·사용량 필드만 반환하고 ID·프롬프트·응답·헤더·추적 세부정보는 반환하지 않는다. `claude` 표면은 CLI와 Desktop을 묶으므로 시간대를 UI와 대조해야 한다. `close_reason=terminal`은 응답 본문 EOF만 뜻하고 `message_stop`이나 Desktop 완료를 증명하지 않는다. 이 선택형 로그 요약은 작은 최근 표본이며 벤치마크가 아니다. 구현 버전은 MCP `1.3.0`다.
 
+## 3090 Ti 단일 카드 시험
+
+모델 버전이나 엔진을 바꿔 시험할 때는 화면 출력에 쓰지 않는 RTX 3090 Ti 한 장만 사용한다. `nvidia-smi`에서 매번 장치 번호와 화면 출력 여부를 확인한 뒤 프로필의 `gpu`에 해당 번호 하나만 지정하고, `gpu_roles`, 다중 GPU 목록, layer split, 추가 복제 실행이 남아 있지 않은지 확인한다. 비전 보조 엔진은 GPU 사용이 꺼져 있어야 한다. 서버가 준비된 뒤에는 `nvidia-smi`의 프로세스별 GPU 배치로 모델 엔진이 지정한 한 장에만 올라갔는지 검증하고, 이 검증 전에는 시험 결과를 채택하지 않는다. 버전을 바꾸기 전 기존 서버·엔진 프로세스가 모두 내려가고 포트가 해제된 것을 확인한 뒤에만 다음 서버를 시작한다. GPU 번호가 바뀌었거나 실제 배치가 다르면 시험을 중단하고 설정을 바로잡으며, 실행 중인 서버를 임의로 종료해 경쟁시키지 않는다.
+
+버전·모델별 선택은 `tools/strata_profile_switch.ps1`과 `%LOCALAPPDATA%/Strata/profile-switcher.json`을 사용한다. 선택표에는 이름별 `server_root`, 해당 버전의 `python`, 원본 `config`, 필요하면 `server_args`를 둔다. `-Mode Validate`는 서버를 건드리지 않고 실행 구성을 준비하며, `-Mode Test`는 유휴 상태·프로세스 소유·GPU 배치·실제 응답을 확인한 뒤 이전 서버로 돌아온다. `-Mode Switch`는 같은 검사를 거쳐 새 프로필을 남긴다. 원본 프로필은 보존하고 GPU 한 장만 지정한 관리용 복사본을 실행한다. 실패하거나 원복을 확인하지 못하면 다음 전환을 시작하지 않는다. Windows 화면 출력 상태를 확인할 수 없는 장치·Strata 프로필 형식이 다른 버전은 자동 전환 대상이라고 가정하지 않는다.
+
 ## 적용 순서
 
 요청 범위와 완료 조건을 확인하고 해당 소유자·실제 버전·현재 파일을 확인한다. 원본을 보존한 최소 변경을 준비하고 관련 검사만 수행한다. 변경을 저장한 사실, 새 프로세스에 반영된 사실, 실제 동작·성능 검증을 구분해 보고한다. MCP stdio 도구는 실행 시 소스 코드를 로드하므로 이미 연결된 세션은 소스 변경을 자동으로 다시 읽지 않는다. 도구 구현을 바꿨다면 MCP를 다시 연결하거나 새 Code 세션에서 도구 목록·버전을 확인한다. 이를 위해 Desktop·OpenCodex·Strata를 불필요하게 재시작하지 않는다. 한 번에 여러 설정을 무근거로 바꿔 최적화라고 부르지 않는다.
