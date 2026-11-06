@@ -1,27 +1,13 @@
 """Request-scoped token biases. Normalize before HTTP streaming starts."""
+import json
 import math
 import re
+import threading
+from collections import OrderedDict
 
 # The Han ban (serve/cjk_ban.py) is tens of thousands of entries and the same dict
-# object every request, so maps above 64 entries are memoized per object identity:
-# pass a large map as a read-only value and never grow or edit it in place.
-_LARGE = 64
-_MEMO_SLOTS = 4
-_normalize_memo: dict = {}
-_key_memo: dict = {}
-
-
-def normalize(value, vocab_size=None):
-    if isinstance(value, dict) and len(value) > _LARGE:
-        hit = _normalize_memo.get(id(value))
-        if hit is not None and hit[0] is value and hit[1] == vocab_size:
-            return dict(hit[2])
-        out = _normalize(value, vocab_size)
-        if len(_normalize_memo) >= _MEMO_SLOTS:
-            _normalize_memo.clear()
-        _normalize_memo[id(value)] = (value, vocab_size, dict(out))
-        return dict(out)
-    return _normalize(value, vocab_size)
+# object every request: pass a large map as a read-only value and never grow or edit
+# it in place, so the identity-based fast path below (_last) answers it from memory.
 
 
 def _normalize(value, vocab_size=None):
@@ -57,30 +43,75 @@ def _normalize(value, vocab_size=None):
     return out
 
 
+# A long list (a standing ban of a whole script is tens of thousands of IDs) is sent with every request and used to be
+# normalized five times per request: in the OpenAI route, twice in validate_request and twice in engine_key (sampling_keys
+# runs for the cache key and again for the GEN line), about 170 ms for 65,929 entries.  A list is now normalized once:
+#  - the same object again in one request is answered from `_last`;
+#  - an equal list in a later request is found by its JSON text, an exact key that tells False from 0 and "1" from 1.
+# Only a list that normalized without an error is stored, so a bad list still raises on every call.  Short lists skip the
+# cache: they cost less than the key.
+_CACHE_MIN = 64
+_CACHE_MAX = 4
+_cache = OrderedDict()   # (vocab_size, JSON text) -> [normalized dict, engine key or None]
+_last = None             # [raw value, its length, {vocab_size: entry}]: the object the previous call was given
+_lock = threading.Lock()
+
+
+def _entry(value, vocab_size):
+    global _last
+    if not isinstance(value, (dict, list)) or len(value) < _CACHE_MIN:
+        return [_normalize(value, vocab_size), None]
+    last = _last
+    if last is not None and last[0] is value and last[1] == len(value):
+        hit = last[2].get(vocab_size)
+        if hit is not None:
+            return hit
+    else:
+        last = None
+    try:
+        key = (vocab_size, json.dumps(value, separators=(",", ":")))
+    except (TypeError, ValueError):
+        key = None   # something JSON cannot write: _normalize raises for it
+    entry = None
+    if key is not None:
+        with _lock:
+            entry = _cache.get(key)
+            if entry is not None:
+                _cache.move_to_end(key)
+    if entry is None:
+        entry = [_normalize(value, vocab_size), None]
+        if key is not None:
+            with _lock:
+                _cache[key] = entry
+                while len(_cache) > _CACHE_MAX:
+                    _cache.popitem(last=False)
+    if key is not None:
+        if last is None:
+            last = [value, len(value), {}]
+            _last = last
+        last[2][vocab_size] = entry
+    return entry
+
+
+def normalize(value, vocab_size=None):
+    return dict(_entry(value, vocab_size)[0])
+
+
 def engine_key(value):
-    if isinstance(value, dict) and len(value) > _LARGE:
-        hit = _key_memo.get(id(value))
-        if hit is not None and hit[0] is value:
-            return hit[1]
-        key = _engine_key(value)
-        if len(_key_memo) >= _MEMO_SLOTS:
-            _key_memo.clear()
-        _key_memo[id(value)] = (value, key)
-        return key
-    return _engine_key(value)
-
-
-def _engine_key(value):
-    entries = normalize(value)
-    return " logit_bias=" + ",".join(f"{i}:{b:g}" for i, b in sorted(entries.items())) if entries else ""
+    entry = _entry(value, None)
+    if not entry[0]:
+        return ""
+    if entry[1] is None:
+        entry[1] = " logit_bias=" + ",".join(f"{i}:{b:g}" for i, b in sorted(entry[0].items()))
+    return entry[1]
 
 
 def validate_request(req, engine, vocab_size):
-    """Fail closed for old engines, unsupported backends and continuous batching."""
+    """Fail closed for old engines and unsupported backends (continuous batching carries a slot's bias since the slot-penalty change)."""
     normalized = normalize(req.get("logit_bias"), vocab_size)
     if normalized:
+        if getattr(engine, "split_engine", False):
+            raise ValueError("logit_bias: not supported by the all-cards split engine; start with --split-engine off")
         if getattr(engine, "info", {}).get("logit_bias") != 1:
             raise ValueError("logit_bias: this engine does not support token biases; use a supporting CUDA/HIP build")
-        if getattr(engine, "batch", 0):
-            raise ValueError("logit_bias: continuous batching is not supported; run without --batch")
     return normalized
