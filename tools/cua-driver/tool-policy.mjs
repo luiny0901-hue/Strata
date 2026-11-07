@@ -128,7 +128,7 @@ function windowCatalogSchema(schema, descriptions) {
   delete properties.screenshot_out_file;
 }
 
-// Revision 3: the session and listing tools keep native long-form text (macOS build details,
+// Revision 3-4: the session and listing tools keep native long-form text (macOS build details,
 // fallback examples). Compress only decorative prose; the flags, filters and selection rules
 // that this proxy relies on stay in the shortened wording.
 const nativeProseReplacements = {
@@ -169,7 +169,7 @@ export function restrictCatalog(tools) {
     if (Object.hasOwn(nativeProseReplacements, tool.name)) return compressNativeProse(tool);
     if (tool.name === "get_window_state") {
       const copy = structuredClone(tool);
-      copy.description = "Read one exact pid/window_id: bounded UIA tree and grounding screenshot. Default markdown rows [N] give element_token=<snapshot_id>:N. Cross-check pixels and tree. Each new tree invalidates older tokens; screenshot-only reads preserve tokens. Inspect truncation flags; query/depth/budget or since can narrow reads. The driver never substitutes another window. Window capture may omit browser-owned overlays: report the coverage gap; do not switch to desktop input. No input is performed.";
+      copy.description = "Read one exact pid/window_id: bounded UIA tree and grounding screenshot. To act fast, read the tree without a screenshot and act by element_token; request a screenshot only for pixel coordinates or visual verification, since each image read costs a full capture cycle. Re-read with since=<earlier snapshot_id> to get changes only. Default markdown rows [N] give element_token=<snapshot_id>:N. Cross-check pixels and tree. Each new tree invalidates older tokens; screenshot-only reads preserve tokens. Inspect truncation flags; query/depth/budget can narrow reads. The driver never substitutes another window. Window capture may omit browser-owned overlays: report the coverage gap; do not switch to desktop input. No input is performed.";
       windowCatalogSchema(copy.inputSchema, {...windowFields, ...snapshotFields});
       return copy;
     }
@@ -181,7 +181,7 @@ export function restrictCatalog(tools) {
     }
     if (!inputTools.has(tool.name)) return tool;
     const copy = structuredClone(tool);
-    copy.description = `${tool.name}: background input on one exact window/current element_token; never use the user's mouse or global input. Pixel actions use latest screenshot coordinates, no offsets/scaling/guesses; re-read after input. Delivery is not success. If ineffective, obtain HUMAN task approval via approved_foreground_action or report BACKGROUND_ONLY_UNSUPPORTED. No shell/native bypass or automated approval; continue only independent authorized work.`;
+    copy.description = `${tool.name}: background input on one exact window/current element_token; never use the user's mouse or global input. Prefer the current element_token when the tree names the target; use pixels only when it does not. Pixel actions use latest screenshot coordinates, no offsets/scaling/guesses; re-read after input. Delivery is not success. If ineffective, obtain HUMAN task approval via approved_foreground_action or report BACKGROUND_ONLY_UNSUPPORTED. No shell/native bypass or automated approval; continue only independent authorized work.`;
     windowCatalogSchema(copy.inputSchema, windowFields);
     const delivery = copy.inputSchema?.properties?.delivery_mode;
     if (delivery) {
