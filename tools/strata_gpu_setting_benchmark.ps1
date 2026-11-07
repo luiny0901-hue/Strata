@@ -8,7 +8,8 @@ param(
     [int]$Rounds = 3,
     [int]$IdleTimeoutSeconds = 900,
     [string]$Scenarios = '',
-    [int]$ColdPromptKilo = 0
+    [int]$ColdPromptKilo = 0,
+    [int]$ImageRounds = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -64,7 +65,7 @@ function Get-DescendantIds([int]$RootId, $Processes) {
     }
     $ids
 }
-function Assert-EnginePlacement([string]$EnginePath, [int[]]$AllowedGpuIndices, [int]$MaxEngines = 1) {
+function Assert-EnginePlacement([string]$EnginePath, [int[]]$AllowedGpuIndices, [bool]$AllowVisionOnGpu = $false, [int]$MaxEngines = 1) {
     $engineList = @(Get-CimInstance Win32_Process -Filter "Name='strata.exe'" | Where-Object {
         [IO.Path]::GetFullPath($_.ExecutablePath) -ieq [IO.Path]::GetFullPath($EnginePath)
     })
@@ -94,14 +95,18 @@ function Assert-EnginePlacement([string]$EnginePath, [int[]]$AllowedGpuIndices, 
         $ids = Get-DescendantIds ([int](Get-ManagerRoots | Select-Object -First 1 -ExpandProperty ProcessId)) (Get-CimInstance Win32_Process)
         $ids.Contains([int]$_.ProcessId)
     })
+    $visionOnGpu = @()
     if ($vision.Count) {
         $visionIds = @($vision | ForEach-Object { [int]$_.ProcessId })
         $visionOnGpu = @($apps | Where-Object { $visionIds -contains $_.pid })
-        if ($visionOnGpu.Count) { throw 'the picture encoder is on a GPU although its profile says gpu=false' }
+        if ($visionOnGpu.Count -and -not $AllowVisionOnGpu) { throw 'the picture encoder is on a GPU although its profile says gpu=false' }
+        $badVision = @($visionOnGpu | Where-Object { $allowedUuids -notcontains $_.uuid })
+        if ($badVision.Count) { throw 'the picture encoder runs on a GPU outside the allowed set' }
     }
     return [pscustomobject]@{
         allowed_gpu_indices = $AllowedGpuIndices; engine_gpu_uuids = @($bound | Select-Object -ExpandProperty uuid -Unique)
         display_active = @($allowed | Select-Object index,display); engine_pids = $engineIds; engine_on_gpu = $bound.Count
+        vision_pids = @($vision | ForEach-Object { [int]$_.ProcessId }); vision_on_gpu_uuids = @($visionOnGpu | Select-Object -ExpandProperty uuid -Unique)
     }
 }
 function Wait-ServerIdle([int]$Seconds) {
@@ -171,6 +176,58 @@ function New-ColdPromptText {
     while ($builder.Length -lt $targetChars) { [void]$builder.Append($line) }
     return 'PROBE-77 sits at the start of this passage. ' + $builder.ToString() + ' After this passage, reply with exactly: PROBE-OK'
 }
+function New-TestImageBase64([int]$Seed, [int]$Pixels) {
+    Add-Type -AssemblyName System.Drawing
+    $random = [Random]::new($Seed)
+    $bitmap = [Drawing.Bitmap]::new($Pixels, $Pixels, [Drawing.Imaging.PixelFormat]::Format24bppRgb)
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    $graphics.Clear([Drawing.Color]::FromArgb(240, 240, 240))
+    for ($i = 0; $i -lt 240; $i++) {
+        $brush = [Drawing.SolidBrush]::new([Drawing.Color]::FromArgb($random.Next(256), $random.Next(256), $random.Next(256)))
+        $x = $random.Next($Pixels - 140); $y = $random.Next($Pixels - 140)
+        $w = 20 + $random.Next(120); $h = 20 + $random.Next(120)
+        $graphics.FillRectangle($brush, $x, $y, $w, $h)
+        $brush.Dispose()
+    }
+    $graphics.Dispose()
+    $stream = [IO.MemoryStream]::new()
+    $bitmap.Save($stream, [Drawing.Imaging.ImageFormat]::Png)
+    $bitmap.Dispose()
+    $bytes = $stream.ToArray(); $stream.Dispose()
+    [Convert]::ToBase64String($bytes)
+}
+function Invoke-ImageProbe([int]$Seed) {
+    $imageBase64 = New-TestImageBase64 $Seed 1024
+    $parameters = [ordered]@{
+        model = 'strata'; max_tokens = 24; temperature = 0; stream = $false
+        messages = @(@{ role = 'user'; content = @(
+            @{ type = 'text'; text = 'Reply with exactly: VISION-OK' },
+            @{ type = 'image_url'; image_url = @{ url = "data:image/png;base64,$imageBase64" } }
+        ) })
+        chat_template_kwargs = @{ enable_thinking = $false }
+    }
+    $body = ConvertTo-Json $parameters -Depth 8
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    $response = Invoke-RestMethod "http://127.0.0.1:$script:port/v1/chat/completions" -Method Post `
+        -ContentType 'application/json' -Headers @{ Authorization = "Bearer $script:apiKey" } `
+        -Body $body -TimeoutSec 600
+    $sw.Stop()
+    if (-not $response.choices -or -not $response.choices.Count) { throw 'image probe returned no choices' }
+    $status = Invoke-RestMethod "http://127.0.0.1:$script:port/v1/status" -Headers @{ Authorization = "Bearer $script:apiKey" } -TimeoutSec 8
+    $timings = Get-Property $status 'last_timings' $null
+    $decodeRate = if ($timings) { [double](Get-Property $timings 'predicted_per_second' 0) } else { 0 }
+    $promptTokens = if ($timings) { [int](Get-Property $timings 'prompt_n' 0) } else { 0 }
+    $cachedTokens = if ($timings) { [int](Get-Property $timings 'cache_n' 0) } else { 0 }
+    $visionRows = @(nvidia-smi --query-compute-apps=gpu_uuid,pid,process_name --format=csv,noheader | Where-Object { $_ -match 'strata-vision' })
+    [pscustomobject]@{
+        wall_seconds = [Math]::Round($sw.Elapsed.TotalSeconds, 3)
+        decode_tokens_per_second = $decodeRate
+        prompt_tokens = $promptTokens
+        cached_prompt_tokens = $cachedTokens
+        vision_gpu_rows = $visionRows
+        text = [string]$response.choices[0].message.content
+    }
+}
 function Get-CompletedJson([int]$Tokens, [bool]$Short = $false) {
     $content = if ($script:coldPromptKilo -gt 0 -and -not $Short) { New-ColdPromptText } else { 'Write one continuous paragraph explaining how predictable GPU memory use helps stable model inference. Continue until you reach the output limit; do not add a heading.' }
     $parameters = [System.Collections.Generic.Dictionary[string, object]]::new()
@@ -211,7 +268,7 @@ function Invoke-TimedCompletion([int]$Tokens, [bool]$Short = $false) {
         text = [string]$response.choices[0].message.content
     }
 }
-function Wait-Ready([string]$ExpectedModel, [string]$ExpectedEngine, [int[]]$AllowedGpuIndices, [int]$TimeoutSeconds, [int]$ManagerPid = 0, [string]$ExpectedConfig = '') {
+function Wait-Ready([string]$ExpectedModel, [string]$ExpectedEngine, [int[]]$AllowedGpuIndices, [int]$TimeoutSeconds, [int]$ManagerPid = 0, [string]$ExpectedConfig = '', [bool]$AllowVisionOnGpu = $false) {
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     while ([DateTime]::UtcNow -lt $deadline) {
         if ($ManagerPid -and -not (Get-Process -Id $ManagerPid -ErrorAction SilentlyContinue)) {
@@ -227,7 +284,7 @@ function Wait-Ready([string]$ExpectedModel, [string]$ExpectedEngine, [int[]]$All
                     continue
                 }
             }
-            $placement = Assert-EnginePlacement $ExpectedEngine $AllowedGpuIndices
+            $placement = Assert-EnginePlacement $ExpectedEngine $AllowedGpuIndices $AllowVisionOnGpu
             $probe = Invoke-TimedCompletion 1 $true
             if (-not $probe.text) { throw 'model probe returned no text' }
             return @{ health = $health; placement = $placement }
@@ -282,6 +339,8 @@ try {
         'kv-k8v4-gpu1' = @{ gpu = 1; allowed = @(1); changes = @{ '--kv' = 'k8v4' } }
         'kv-grow-gpu1' = @{ gpu = 1; allowed = @(1); changes = @{ '--kv-grow' = $null; '--kv-resident' = $null } }
         'peer-gpu0-gpu1' = @{ gpu = '1,0'; allowed = @(0,1); changes = @{ '--peer-device' = '1' } }
+        'vision-gpu-1216-gpu1' = @{ gpu = 1; allowed = @(1); visionGpu = $true; changes = @{} }
+        'vision-gpu-2048-gpu1' = @{ gpu = 1; allowed = @(1); visionGpu = $true; changes = @{ '--vram-reserve-mib' = '2048' } }
     }
     if (-not [string]::IsNullOrWhiteSpace($Scenarios)) {
         $selected = [ordered]@{}
@@ -304,6 +363,7 @@ try {
     foreach ($name in $prompts.Keys) {
         $scenario = $prompts[$name]
         $scenarioGpu = $scenario.gpu
+        $visionOn = [bool]$scenario.visionGpu
         $scenarioArgs = [System.Collections.Generic.List[string]]::new($baseArgs)
         foreach ($key in $scenario.changes.Keys) { Set-EngineArgument $scenarioArgs ([string]$key) $scenario.changes[$key] }
         $testConfig = $config | ConvertTo-Json -Depth 100 | ConvertFrom-Json
@@ -312,7 +372,7 @@ try {
             $testConfig.PSObject.Properties.Remove('gpu')
             $testConfig.PSObject.Properties.Remove('gpus_asked')
         } else { $testConfig.gpu = $scenarioGpu }
-        $testConfig.vision.gpu = $false
+        $testConfig.vision.gpu = $visionOn
         $testConfig.log = Join-Path $ResultDirectory "engine-$name.log"
         $safe = $name -replace '[^A-Za-z0-9._-]', '_'
         $managedConfig = Join-Path $profileDir "$safe.json"
@@ -353,7 +413,7 @@ try {
         $rootPid = Start-Manager $command ([string]$script:supervisor.working_directory)
         $allowedGpus = [int[]]$scenario.allowed
         Write-Progress-Line "starting scenario $name; allowed GPU set $($allowedGpus -join ',')"
-        $ready = Wait-Ready $modelName $enginePath $allowedGpus ([int](Get-Property $profileEntry 'ready_timeout_seconds' 1800)) $rootPid $managedConfig
+        $ready = Wait-Ready $modelName $enginePath $allowedGpus ([int](Get-Property $profileEntry 'ready_timeout_seconds' 1800)) $rootPid $managedConfig $visionOn
         Invoke-TimedCompletion $WarmupTokens $true | Out-Null
         $samples = [System.Collections.Generic.List[object]]::new()
         for ($round = 1; $round -le $Rounds; $round++) {
@@ -369,12 +429,22 @@ try {
         }
         $sorted = @($samples | Sort-Object decode_tokens_per_second)
         $median = $sorted[[int][Math]::Floor(($sorted.Count - 1) / 2.0)].decode_tokens_per_second
-        $finalPlacement = Assert-EnginePlacement $enginePath $allowedGpus
+        $imageSamples = @()
+        if ($ImageRounds -gt 0) {
+            Invoke-ImageProbe 1000 | Out-Null
+            for ($ir = 1; $ir -le $ImageRounds; $ir++) {
+                $probe = Invoke-ImageProbe (2000 + $ir)
+                $imageSamples += [pscustomobject]@{ round = $ir; wall_seconds = $probe.wall_seconds; decode_tokens_per_second = $probe.decode_tokens_per_second; prompt_tokens = $probe.prompt_tokens; cached_prompt_tokens = $probe.cached_prompt_tokens; vision_gpu_rows = $probe.vision_gpu_rows }
+                $wallText = '{0:N2}' -f $probe.wall_seconds
+                Write-Progress-Line "scenario $name image round $ir wall ${wallText}s prompt $($probe.prompt_tokens) vision_on_gpu=$($probe.vision_gpu_rows.Count)"
+            }
+        }
+        $finalPlacement = Assert-EnginePlacement $enginePath $allowedGpus $visionOn
         $gpuState = @(Get-GpuMap | Select-Object index, display, used_mib, free_mib)
         $scenarioResults.Add([pscustomobject]@{
             scenario = $name; requested_gpu = $scenarioGpu; argument_changes = $scenario.changes
             model = $modelName; context = $ready.health.max_context
-            median_tokens_per_second = $median; samples = $samples; placement = $finalPlacement
+            median_tokens_per_second = $median; samples = $samples; image_samples = $imageSamples; placement = $finalPlacement
             gpu_state_after = $gpuState; engine_log = $testConfig.log
         })
         [IO.File]::WriteAllText($jsonPath, (@($scenarioResults) | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
