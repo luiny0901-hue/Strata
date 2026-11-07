@@ -128,9 +128,45 @@ function windowCatalogSchema(schema, descriptions) {
   delete properties.screenshot_out_file;
 }
 
+// Revision 3: the session and listing tools keep native long-form text (macOS build details,
+// fallback examples). Compress only decorative prose; the flags, filters and selection rules
+// that this proxy relies on stay in the shortened wording.
+const nativeProseReplacements = {
+  start_session: {
+    description: "Create or fetch the lifecycle session before multi-call work. Repeat one short `session` label on every related call; an omitted label uses the transport's implicit session. Ordinary actions create or reuse a named run by themselves, so use this tool only to set the initial cursor state or to revive an ended public name. Idempotent.",
+    session: "Stable public label; reuse it across related calls. Omitted uses the transport's implicit session.",
+    cursor_theme: "Optional initial cursor theme, applied before the cursor is first shown.",
+    cursor_motion: "Optional initial cursor motion, applied before the cursor is first shown; a later set_agent_cursor_motion call wins and reduced motion always wins.",
+    capture_scope: "Deprecated and ignored; select window or desktop modality per action.",
+  },
+  list_apps: {
+    description: "List installed and running Windows apps with state flags: running (pid 0 when false), active (system-frontmost), kind desktop or uwp, launch_path (what launch_app consumes), last_used when readable. Running entries come from visible top-level windows plus the foreground pid; a running process matching a Start-Menu target merges into that entry. Use for installed/running checks; use list_windows for window-level questions; launch_app needs no prior list.",
+  },
+  list_windows: {
+    description: "List top-level windows known to the window manager. Each record is self-contained: window_id (HWND), pid + app_name, title, bounds, z_index (higher is closer to the front; null means stacking is unavailable - never infer one; pick the frontmost by the maximum integer z_index, or an explicit fallback when all are null), is_on_screen, minimized. Use this, not list_apps, for window-level reasoning. An unfiltered call lists every window.",
+  },
+};
+
+function compressNativeProse(tool) {
+  const replacement = nativeProseReplacements[tool.name];
+  if (!replacement) return tool;
+  const copy = structuredClone(tool);
+  if (replacement.description) copy.description = replacement.description;
+  for (const [name, description] of Object.entries(replacement)) {
+    if (name !== "description" && copy.inputSchema?.properties?.[name]) {
+      copy.inputSchema.properties[name].description = description;
+    }
+  }
+  if (copy.inputSchema?.properties?.session && tool.name !== "start_session") {
+    copy.inputSchema.properties.session.description = nativeProseReplacements.start_session.session;
+  }
+  return copy;
+}
+
 // Keep the supported window contract concise; never advertise rejected routes.
 export function restrictCatalog(tools) {
   return tools.map((tool) => {
+    if (Object.hasOwn(nativeProseReplacements, tool.name)) return compressNativeProse(tool);
     if (tool.name === "get_window_state") {
       const copy = structuredClone(tool);
       copy.description = "Read one exact pid/window_id: bounded UIA tree and grounding screenshot. Default markdown rows [N] give element_token=<snapshot_id>:N. Cross-check pixels and tree. Each new tree invalidates older tokens; screenshot-only reads preserve tokens. Inspect truncation flags; query/depth/budget or since can narrow reads. The driver never substitutes another window. Window capture may omit browser-owned overlays: report the coverage gap; do not switch to desktop input. No input is performed.";

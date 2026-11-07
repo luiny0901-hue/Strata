@@ -853,7 +853,7 @@ def default_client_mcp_source():
             'args': [str(ROOT/'tools/cua-driver/mcp.mjs')],
             'env': {'CUA_DRIVER_EXE': local_cua_executable(),
                     'CUA_DRIVER_POLICY_FILE': str(ROOT/'tools/cua-driver/window-scoped.rego'),
-                    'CUA_DRIVER_PERMISSION_MODE': 'standard', 'STRATA_CUA_CATALOG_REVISION': '2'}},
+                    'CUA_DRIVER_PERMISSION_MODE': 'standard', 'STRATA_CUA_CATALOG_REVISION': '3'}},
         'rea': {'type': 'stdio', 'command': str(Path(sys.executable).resolve()),
             'args': [str(ROOT/'tools/claude_mcp/rea_launcher.py'), 'rea-agents@6.7.0', 'mcp']}}}
 
