@@ -73,7 +73,8 @@
   "sampling": {
     "temperature": 1.0,
     "top_p": 0.95,
-    "top_k": 20
+    "top_k": 20,
+    "frequency_penalty": 0.3
   },
   "anthropic_thinking": "on_request",
   "reasoning_budget_tokens": 8192,

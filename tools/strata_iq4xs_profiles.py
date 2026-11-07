@@ -131,7 +131,8 @@ def validate_templates(repository_root: Path) -> list[str]:
         assert bool(profile.get("ban_cjk_tokens")) is (mode == "on"), f"{mode}: wrong CJK ban default"
         assert profile.get("model_name") == MODEL_KEY, f"{mode}: wrong model id"
         assert profile.get("port") == 8080 and profile.get("gpu") == 1, f"{mode}: wrong endpoint/GPU"
-        assert profile.get("sampling") == {"temperature": 1.0, "top_p": 0.95, "top_k": 20}
+        assert profile.get("sampling") == {"temperature": 1.0, "top_p": 0.95, "top_k": 20,
+                                           "frequency_penalty": 0.3}
         assert profile.get("reasoning_budget_tokens") == 8192
         assert "--max-context" in args, f"{mode}: missing context limit"
         assert args[args.index("--max-context") + 1] == "262144", f"{mode}: wrong context limit"
