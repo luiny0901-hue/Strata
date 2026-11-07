@@ -334,11 +334,13 @@ try {
         'gpu-unlocked-auto' = @{ gpu = $null; allowed = @(0,1); changes = @{} }
         'prefill-16k-gpu1' = @{ gpu = 1; allowed = @(1); changes = @{ '--prefill' = 'auto:16384' } }
         'reserve-448-gpu1' = @{ gpu = 1; allowed = @(1); changes = @{ '--vram-reserve-mib' = '448' } }
+        'reserve-768-16384-gpu1' = @{ gpu = 1; allowed = @(1); changes = @{ '--vram-reserve-mib' = '768' } }
         'prefill-16k-reserve-448-gpu1' = @{ gpu = 1; allowed = @(1); changes = @{ '--prefill' = 'auto:16384'; '--vram-reserve-mib' = '448' } }
         'prefill-16k-reserve-1216-gpu1' = @{ gpu = 1; allowed = @(1); changes = @{ '--prefill' = 'auto:16384'; '--vram-reserve-mib' = '1216' } }
         'kv-k8v4-gpu1' = @{ gpu = 1; allowed = @(1); changes = @{ '--kv' = 'k8v4' } }
         'kv-grow-gpu1' = @{ gpu = 1; allowed = @(1); changes = @{ '--kv-grow' = $null; '--kv-resident' = $null } }
         'peer-gpu0-gpu1' = @{ gpu = '1,0'; allowed = @(0,1); changes = @{ '--peer-device' = '1' } }
+        'peer-kv-grow-gpu0-gpu1' = @{ gpu = '1,0'; allowed = @(0,1); changes = @{ '--peer-device' = '1'; '--kv-grow' = $null; '--kv-resident' = $null } }
         'vision-gpu-1216-gpu1' = @{ gpu = 1; allowed = @(1); visionGpu = $true; changes = @{} }
         'vision-gpu-2048-gpu1' = @{ gpu = 1; allowed = @(1); visionGpu = $true; changes = @{ '--vram-reserve-mib' = '2048' } }
     }
