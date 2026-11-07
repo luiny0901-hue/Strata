@@ -77,6 +77,10 @@ build-vision-cuda12.bat
 !/run-claude-opencodex.sh
 !/run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-on-1m.bat
 !/run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-off-1m.bat
+!/run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-on-1m-2gpu.bat
+!/run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-off-1m-2gpu.bat
+!/run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-on-2gpu.bat
+!/run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-off-2gpu.bat
 
 # Local source-integration backups, not distributable runtime assets.
 /serve/.response-guard/

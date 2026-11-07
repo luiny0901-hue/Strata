@@ -7,6 +7,13 @@ if "%STRATA_IQ4XS_CONTEXT%"=="1048576" (
     set "CONTEXT_TOKENS=1048576"
     set "CONTEXT_SUFFIX=-1m"
 )
+set "DUAL_SUFFIX="
+set "GPUS_ARGS="
+if defined STRATA_IQ4XS_DUAL if not "%STRATA_IQ4XS_DUAL%"=="1" (echo Unsupported card override.& exit /b 34)
+if "%STRATA_IQ4XS_DUAL%"=="1" (
+    set "DUAL_SUFFIX=-2gpu"
+    set "GPUS_ARGS=--gpus 0,1"
+)
 title Strata NVFP4 fork - Unsloth UD-IQ4_XS - uncensored OFF
 set "STRATA_ROOT=%~dp0"
 set "DATA_ROOT=%USERPROFILE%\Strata-data"
@@ -16,7 +23,7 @@ set "MODEL_DIR=%DATA_ROOT%\models\unsloth-UD-IQ4_XS"
 set "PACK_DIR=%DATA_ROOT%\packs\unsloth-ud-iq4_xs"
 set "MTP_DIR=%DATA_ROOT%\mtp\rt"
 set "PROFILE_DIR=%LOCALAPPDATA%\Strata\profiles"
-set "PROFILE=%PROFILE_DIR%\strata-unsloth-ud-iq4_xs-nvfp4fork-uncensored-off%CONTEXT_SUFFIX%.json"
+set "PROFILE=%PROFILE_DIR%\strata-unsloth-ud-iq4_xs-nvfp4fork-uncensored-off%CONTEXT_SUFFIX%%DUAL_SUFFIX%.json"
 set "PYTHON=%STRATA_ROOT%.venv\Scripts\python.exe"
 set "PYTHONPATH=%STRATA_ROOT%tools;%PYTHONPATH%"
 set "VECTOR=%FORK_ROOT%\data\uncensor\qwen-nvfp4-gptq-uncensored.gguf"
@@ -87,7 +94,7 @@ if not exist "%VECTOR%" (echo NVFP4 fork refusal projection is missing.& if not 
 if not exist "%DATA_ROOT%\logs" mkdir "%DATA_ROOT%\logs"
 if errorlevel 1 (echo Could not create the Strata log directory.& if not defined STRATA_SUPERVISOR_CHILD pause& exit /b 17)
 if not exist "%PROFILE_DIR%" mkdir "%PROFILE_DIR%"
-"%PYTHON%" "%STRATA_ROOT%tools\strata_iq4xs_profiles.py" render-profile --mode off --strata-root "%STRATA_ROOT%." --data-root "%DATA_ROOT%" --output "%PROFILE%" --context %CONTEXT_TOKENS%
+"%PYTHON%" "%STRATA_ROOT%tools\strata_iq4xs_profiles.py" render-profile --mode off --strata-root "%STRATA_ROOT%." --data-root "%DATA_ROOT%" --output "%PROFILE%" --context %CONTEXT_TOKENS% %GPUS_ARGS%
 if errorlevel 1 (echo Could not render the OFF profile.& if not defined STRATA_SUPERVISOR_CHILD pause& exit /b 18)
 
 "%PYTHON%" "%STRATA_ROOT%tools\patch_nvfp4_server_effort.py" "%FORK_ROOT%\serve\server.py"
@@ -115,6 +122,8 @@ echo Uncensored mode is OFF; the compatible refusal projection is loaded.
 echo Context cap: %CONTEXT_TOKENS%. Start a new client session after switching context.
 if "%CONTEXT_TOKENS%"=="1048576" echo 1M context uses dynamic RoPE: trained angles through 262K, then YaRN up to factor 4.
 echo Vision encoding uses CPU. The comparison sent no image.
+if "%STRATA_IQ4XS_DUAL%"=="1" echo Two RTX 3090 Ti cards share the layers (layer split); the head runs on GPU 1.
+if defined STRATA_ARENA_PIN_GIB echo The split pins at most %STRATA_ARENA_PIN_GIB% GiB per GPU (WDDM shared-memory budget).
 "%PYTHON%" -m serve.server --engine strata --config "%PROFILE%" --host "%STRATA_BIND_HOST%" --port 8080 --image-max-tokens 1024
 set "EXIT_CODE=%ERRORLEVEL%"
 if not "%EXIT_CODE%"=="0" (echo Strata fork server exited with code %EXIT_CODE%.& if not defined STRATA_SUPERVISOR_CHILD pause)

@@ -38,6 +38,26 @@ class LauncherImageBudgetTests(unittest.TestCase):
                 self.assertEqual(result.returncode,7)
                 self.assertIn(b'CONTEXT=1048576 MODE=--managed',result.stdout)
 
+    @unittest.skipUnless(os.name == 'nt', 'Windows CMD wrapper contract')
+    def test_2gpu_wrappers_forward_context_and_dual_mode_with_spaces(self):
+        with tempfile.TemporaryDirectory(prefix='strata 2gpu ') as temporary:
+            root = Path(temporary)
+            for mode in ('on', 'off'):
+                stem = f'run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-{mode}'
+                for suffix, expected in (('-2gpu', b'CONTEXT= DUAL=1 MODE=--managed'),
+                                         ('-1m-2gpu', b'CONTEXT=1048576 DUAL=1 MODE=--managed')):
+                    filename = stem + suffix + '.bat'
+                    (root / filename).write_bytes((ROOT / filename).read_bytes())
+                    (root / (stem + '.bat')).write_bytes(b'@echo off\r\n'
+                        b'echo CONTEXT=%STRATA_IQ4XS_CONTEXT% DUAL=%STRATA_IQ4XS_DUAL% MODE=%1\r\n'
+                        b'exit /b 7\r\n')
+                    # inside the supervisor's child the dual launcher delegates to its base launcher
+                    env = {**os.environ, 'STRATA_SUPERVISOR_CHILD': '1'}
+                    result = subprocess.run(['cmd.exe','/d','/c',str(root / filename)],
+                                            capture_output=True,timeout=10,env=env)
+                    self.assertEqual(result.returncode,7)
+                    self.assertIn(expected,result.stdout)
+
     def test_both_uncensored_modes_use_the_1024_image_token_budget(self) -> None:
         for mode in ("off", "on"):
             with self.subTest(mode=mode):
@@ -72,7 +92,7 @@ class ProfileTemplateTests(unittest.TestCase):
                 profile = json.loads(extended.read_text(encoding='utf-8'))
                 args = profile['args']
                 for flag, expected in [('--max-context', '1048576'), ('--rope-scaling', 'dynamic'),
-                                       ('--rope-scale', '4'), ('--vram-reserve-mib', '768')]:
+                                       ('--rope-scale', '4'), ('--vram-reserve-mib', '1216')]:
                     self.assertEqual(args.count(flag), 1)
                     self.assertEqual(args[args.index(flag)+1], expected)
                 self.assertEqual(profile['model_name'], MODEL_KEY)
@@ -89,6 +109,35 @@ class ProfileTemplateTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     render_profile(ROOT, mode, ROOT, base, normal, 1000000)
                 self.assertEqual(normal.read_bytes(), before)
+
+    def test_2gpu_renders_the_layer_split_without_the_peer_tier(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            for mode in ("on", "off"):
+                plain, dual = base / (mode + ".json"), base / (mode + "-2gpu.json")
+                render_profile(ROOT, mode, ROOT, base, plain)
+                render_profile(ROOT, mode, ROOT, base, dual, gpus="0,1")
+                before = plain.read_bytes()
+                profile = json.loads(dual.read_text(encoding="utf-8"))
+                self.assertEqual(profile["gpu"], [0, 1])
+                self.assertEqual(profile["gpu_order"], "as_given")
+                args = profile["args"]
+                self.assertEqual(args.count("--layer-split"), 1)
+                self.assertEqual(args[args.index("--layer-split") + 1], "auto")
+                self.assertNotIn("--peer-device", args)
+                self.assertNotIn("--layer-split", json.loads(plain.read_text(encoding="utf-8"))["args"])
+                self.assertTrue(profile["log"].endswith("-2gpu.log"))
+                self.assertEqual(plain.read_bytes(), before)
+
+    def test_invalid_gpu_lists_keep_the_stored_profile(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "profile.json"
+            render_profile(ROOT, "on", ROOT, Path(temporary), path)
+            before = path.read_bytes()
+            for value in ("1", "1,1", "x,0", "1,0,2", ",1"):
+                with self.subTest(value=value), self.assertRaises(ValueError):
+                    render_profile(ROOT, "on", ROOT, Path(temporary), path, gpus=value)
+                self.assertEqual(path.read_bytes(), before)
 
     def test_installer_gpu_override_is_local_and_invalid_values_do_not_replace_profiles(self):
         import os
@@ -135,8 +184,8 @@ class ProfileTemplateTests(unittest.TestCase):
                     str(data_root / "packs" / "unsloth-ud-iq4_xs"),
                 )
                 self.assertEqual(profile["args"][profile["args"].index("--max-context") + 1], "262144")
-                self.assertEqual(profile["args"][profile["args"].index("--vram-reserve-mib") + 1], "768")
-                self.assertEqual(profile["args"][profile["args"].index("--prefill") + 1], "auto:8192")
+                self.assertEqual(profile["args"][profile["args"].index("--vram-reserve-mib") + 1], "1216")
+                self.assertEqual(profile["args"][profile["args"].index("--prefill") + 1], "auto:16384")
                 for option, value in (("--conversation-cache-mib", "8192"),
                                       ("--conversation-cache-slots", "2"),
                                       ("--conversation-cache-min-free-mib", "8192"),

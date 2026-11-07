@@ -50,6 +50,7 @@ def render_profile(
     data_root: Path,
     output_path: Path,
     context: int = 262144,
+    gpus: str | None = None,
 ) -> Path:
     if mode not in ("on", "off"):
         raise ValueError("mode must be 'on' or 'off'")
@@ -74,15 +75,31 @@ def render_profile(
     }
     template = json.loads(_template_path(repository_root, mode).read_text(encoding="utf-8"))
     profile = _replace_tokens(template, replacements)
+    name_suffix = ""
     if context != 262144:
         args = profile["args"]
         args[args.index("--max-context") + 1] = str(context)
         # Keep trained rotations for short dialogs and extend only when needed.
         args.extend(["--rope-scaling", "dynamic", "--rope-scale", "4"])
         profile["rope_auto"] = True
-        profile["log"] = str(Path(profile["log"]).with_name(Path(profile["log"]).stem + "-1m.log"))
+        name_suffix += "-1m"
+    if gpus:
+        parts = [part.strip() for part in str(gpus).split(",")]
+        if len(parts) != 2 or any(not part.isdigit() for part in parts) or parts[0] == parts[1]:
+            raise ValueError("gpus must be two different GPU numbers, for example 1,0")
+        # Layer split (--layer-split): both cards run model layers. The engine stages the
+        # list in order and keeps the head, the draft and the verify on the LAST
+        # card (docs/MULTI_GPU.md: the last card is Main), so the quiet card goes
+        # last and the card driving the display only runs its share of the layers.
+        # Control vectors work across a split (MULTI_GPU.md "Limits").
+        profile["gpu"] = [int(parts[0]), int(parts[1])]
+        profile["gpu_order"] = "as_given"
+        profile["args"] += ["--layer-split", "auto"]
+        name_suffix += "-2gpu"
+    if name_suffix:
+        profile["log"] = str(Path(profile["log"]).with_name(Path(profile["log"]).stem + name_suffix + ".log"))
     gpu_override = os.environ.get("STRATA_SERVER_GPU")
-    if gpu_override is not None:
+    if gpu_override is not None and not gpus:
         gpu = int(gpu_override)
         if gpu < 0:
             raise ValueError("STRATA_SERVER_GPU must be a nonnegative GPU index")
@@ -218,6 +235,8 @@ def main(argv: list[str] | None = None) -> int:
     render.add_argument("--data-root", type=Path, default=Path.home() / "Strata-data")
     render.add_argument("--output", type=Path, required=True)
     render.add_argument("--context", type=int, choices=CONTEXT_SIZES, default=262144)
+    render.add_argument("--gpus", help="two nvidia-smi cards, for example 0,1: both run model layers "
+                                       "(layer split); the last one runs the head, the draft and the verify")
 
     validate = commands.add_parser("validate-templates", help="check the portable ON/OFF templates")
     validate.add_argument("--repository-root", type=Path, default=Path(__file__).resolve().parents[1])
@@ -247,6 +266,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.data_root,
                 args.output,
                 args.context,
+                args.gpus,
             )
             print(path)
         elif args.command == "validate-templates":
