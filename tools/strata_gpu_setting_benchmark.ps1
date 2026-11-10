@@ -174,7 +174,8 @@ function New-ColdPromptText {
     $line = 'Optimization probe passage 0123456789: the quick brown fox jumps over the lazy dog while the steady engine keeps its cache warm. '
     $builder = [Text.StringBuilder]::new()
     while ($builder.Length -lt $targetChars) { [void]$builder.Append($line) }
-    return 'PROBE-77 sits at the start of this passage. ' + $builder.ToString() + ' After this passage, reply with exactly: PROBE-OK'
+    # Long-context jobs: the big passage is followed by a real generation, so decode is measured over the full context too.
+    return 'PROBE-77 sits at the start of this passage. ' + $builder.ToString() + ' After this passage, write one continuous paragraph explaining how predictable GPU memory use helps stable model inference. Continue until you reach the output limit; do not add a heading.'
 }
 function New-TestImageBase64([int]$Seed, [int]$Pixels) {
     Add-Type -AssemblyName System.Drawing
@@ -341,6 +342,7 @@ try {
         'kv-grow-gpu1' = @{ gpu = 1; allowed = @(1); changes = @{ '--kv-grow' = $null; '--kv-resident' = $null } }
         'peer-gpu0-gpu1' = @{ gpu = '1,0'; allowed = @(0,1); changes = @{ '--peer-device' = '1' } }
         'peer-kv-grow-gpu0-gpu1' = @{ gpu = '1,0'; allowed = @(0,1); changes = @{ '--peer-device' = '1'; '--kv-grow' = $null; '--kv-resident' = $null } }
+        'split-gpu0-gpu1' = @{ gpu = '0,1'; allowed = @(0,1); changes = @{ '--layer-split' = 'auto' }; env = @{ STRATA_ARENA_PIN_GIB = '20' } }
         'vision-gpu-1216-gpu1' = @{ gpu = 1; allowed = @(1); visionGpu = $true; changes = @{} }
         'vision-gpu-2048-gpu1' = @{ gpu = 1; allowed = @(1); visionGpu = $true; changes = @{ '--vram-reserve-mib' = '2048' } }
     }
@@ -383,13 +385,18 @@ try {
         $engineDir = [IO.Path]::GetDirectoryName($enginePath)
         $libDirs = @($engineDir) + @($config.lib_dirs | ForEach-Object { [string]$_ })
         $pathText = (@($libDirs | Select-Object -Unique) -join ';')
+        $envLines = @()
+        if ($scenario.ContainsKey('env')) {
+            foreach ($envName in $scenario.env.Keys) { $envLines += ('set "' + [string]$envName + '=' + [string]$scenario.env[$envName] + '"') }
+        }
         $launcherLines = @(
             '@echo off', 'setlocal',
             'set "STRATA_API_KEY="',
             ('for /f "usebackq delims=" %%K in ("' + [string]$registry.api_key_file + '") do set "STRATA_API_KEY=%%K"'),
             'if not defined STRATA_API_KEY exit /b 24',
             ('set "PATH=' + $pathText + ';%PATH%"'),
-            ('set "PYTHONPATH=' + [string]$script:supervisor.working_directory + '\tools;%PYTHONPATH%"'),
+            ('set "PYTHONPATH=' + [string]$script:supervisor.working_directory + '\tools;%PYTHONPATH%"')
+        ) + $envLines + @(
             ('cd /d "' + [string]$profileEntry.server_root + '" || exit /b 20'),
             ('"' + [string]$profileEntry.python + '" -m serve.server --engine strata --config "' + $managedConfig + '" --host "' + $script:bindHost + '" --port ' + $script:port + ' ' + (@($profileEntry.server_args | ForEach-Object { '"' + [string]$_ + '"' }) -join ' ')),
             'exit /b %ERRORLEVEL%'

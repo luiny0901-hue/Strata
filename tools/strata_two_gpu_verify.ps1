@@ -1,5 +1,11 @@
-# Verify the default-context ON/OFF layer-split launchers, then restore the exact server found at startup.
+# Verify the ON/OFF layer-split launchers for one context size, then restore the exact server found at startup.
+param(
+    [string]$LauncherSuffix = '-2gpu.bat',   # '-1m-2gpu.bat' for the 1M pair; it also names the expected logs
+    [int]$Context = 262144,                  # the context the split launchers must come up with
+    [string[]]$Modes = @('on', 'off')
+)
 $ErrorActionPreference = 'Stop'
+$logSuffix = $LauncherSuffix -replace '\.bat$', ''
 $batRoot = 'C:\Users\luiny\Strata'
 $dataRoot = Join-Path $env:USERPROFILE 'Strata-data'
 $model = 'qwen3.8-flash-next-unsloth-ud-iq4_xs'
@@ -159,7 +165,7 @@ function Test-Dual([string]$mode) {
     if ($uuids.Count -ne 2 -or $uuids -notcontains $gpu1Uuid -or $uuids -notcontains $gpu0Uuid) {
         throw "$mode engine did not run on both expected RTX 3090 Ti cards: $($uuids -join ' ')"
     }
-    $log = Join-Path $dataRoot "logs\strata-unsloth-ud-iq4_xs-nvfp4fork-uncensored-$mode-2gpu.log"
+    $log = Join-Path $dataRoot "logs\strata-unsloth-ud-iq4_xs-nvfp4fork-uncensored-$mode$logSuffix.log"
     if (-not (Test-Path -LiteralPath $log -PathType Leaf)) { throw "$mode engine log is missing: $log" }
     # The engine log is appended across runs: judge only the lines the current start wrote.
     $startLine = @(Select-String -LiteralPath $log -SimpleMatch 'engine started:') | Select-Object -Last 1
@@ -187,13 +193,13 @@ try {
     Write-Output "existing server verified: context=$($original.health.max_context), launcher=$($original.launcher)"
     Stop-Server $original.launcher
 
-    foreach ($mode in @('on', 'off')) {
-        $name = "run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-$mode-2gpu.bat"
+    foreach ($mode in $Modes) {
+        $name = "run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-$mode$logSuffix.bat"
         Start-Bat $name
         $dualLauncher = Join-Path $batRoot $name
-        $ready = Wait-Ready $dualLauncher 262144
+        $ready = Wait-Ready $dualLauncher $Context
         Test-Dual $mode
-        Invoke-Probe "262K two-card $mode"
+        Invoke-Probe "$Context two-card $mode"
         Stop-Server $dualLauncher
         $script:activeLauncher = $null
     }
