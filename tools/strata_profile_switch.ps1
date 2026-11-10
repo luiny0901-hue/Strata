@@ -256,7 +256,8 @@ try {
     [IO.File]::WriteAllText($script:managedConfig,$managedJson,[Text.UTF8Encoding]::new($false))
 
     $pathItems = @([IO.Path]::GetDirectoryName($enginePath)) + @($config.lib_dirs | ForEach-Object { [string]$_ })
-    foreach ($item in @($pathItems) + @($script:entry.server_args)) { if ($item) { Assert-SafeLiteral ([string]$item) 'launcher value' } }
+    $toolsPath = Join-Path ([string]$script:supervisor.working_directory) 'tools'
+    foreach ($item in @($pathItems) + @($script:entry.server_args) + @($toolsPath)) { if ($item) { Assert-SafeLiteral ([string]$item) 'launcher value' } }
     $pathText = (@($pathItems | Select-Object -Unique) -join ';')
     $extraArgs = @($script:entry.server_args | ForEach-Object { Quote-Argument ([string]$_) }) -join ' '
     $launcherLines = @(
@@ -266,6 +267,7 @@ try {
         ('for /f "usebackq delims=" %%K in ("' + [string]$registry.api_key_file + '") do set "STRATA_API_KEY=%%K"'),
         'if not defined STRATA_API_KEY exit /b 24',
         ('set "PATH=' + $pathText + ';%PATH%"'),
+        ('set "PYTHONPATH=' + $toolsPath + ';%PYTHONPATH%"'),
         ('cd /d "' + [string]$script:entry.server_root + '" || exit /b 20'),
         ('"' + [string]$script:entry.python + '" -m serve.server --engine strata --config "' + $script:managedConfig + '" --host "' + $script:bindHost + '" --port ' + $script:port + ' ' + $extraArgs),
         'exit /b %ERRORLEVEL%'
