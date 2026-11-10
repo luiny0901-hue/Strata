@@ -17,14 +17,41 @@ PROFILE_STEM = "strata-unsloth-ud-iq4_xs-nvfp4fork-uncensored"
 FORK_RELATIVE = Path(
     "forks/sergqwer-strata-nvfp4-v0.1.44.1-nvfp4.2/strata-nvfp4"
 )
-MODEL_REVISION = "2c41bd2a0b3f51c503c11f1c7ed2e6bb34036beb"
+MODEL_REVISION = "084c631ac221016019d6e0a863afe92d90edd3b0"
 SHARD_NAMES = (
-    "Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf",
-    "Qwen3.8-Flash-Next-UD-IQ4_XS-00002-of-00003.gguf",
-    "Qwen3.8-Flash-Next-UD-IQ4_XS-00003-of-00003.gguf",
+    "Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00004.gguf",
+    "Qwen3.8-Flash-Next-UD-IQ4_XS-00002-of-00004.gguf",
+    "Qwen3.8-Flash-Next-UD-IQ4_XS-00003-of-00004.gguf",
+    "Qwen3.8-Flash-Next-UD-IQ4_XS-00004-of-00004.gguf",
 )
-DEFAULT_MANIFEST = "docs/reports/2026-10-17-iq4xs-artifact-manifest.json"
+PLE_SHARD_NAME = SHARD_NAMES[3]
+DEFAULT_MANIFEST = "docs/iq4xs-v31-artifact-manifest.json"
 CONTEXT_SIZES = (262144, 1048576)
+
+# Model variants the shared templates can render. Templates hard-code the IQ4_XS file
+# names and model id; other variants are produced by literal replacement, which keeps
+# validate-templates and every existing IQ4_XS launcher byte-identical by default.
+MODEL_VARIANTS = {
+    "iq4_xs": {
+        "model_key": MODEL_KEY,
+        "profile_stem": PROFILE_STEM,
+        "model_dir": ("models", "unsloth-UD-IQ4_XS"),
+        "pack_dir": ("packs", "unsloth-ud-iq4_xs"),
+        "shard_native": SHARD_NAMES[0],
+        "shard_ple": PLE_SHARD_NAME,
+    },
+    # Same base model and revision as IQ4_XS (HF Dynamic v3.1 re-shard, 111 GB on disk).
+    # Benchmarks q4kxl-ab-20261110 and buildtask-20261110 ran this exact combination on
+    # the fork with the IQ4-trained expert profile retained (the serve boot gate needs it).
+    "q4_k_xl": {
+        "model_key": "qwen3.8-flash-next-unsloth-ud-q4_k_xl",
+        "profile_stem": "strata-unsloth-ud-q4_k_xl-nvfp4fork-uncensored",
+        "model_dir": ("models", "unsloth-UD-Q4_K_XL"),
+        "pack_dir": ("packs", "unsloth-ud-q4_k_xl"),
+        "shard_native": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
+        "shard_ple": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00004-of-00004.gguf",
+    },
+}
 
 
 def _template_path(repository_root: Path, mode: str) -> Path:
@@ -51,11 +78,15 @@ def render_profile(
     output_path: Path,
     context: int = 262144,
     gpus: str | None = None,
+    model: str = "iq4_xs",
 ) -> Path:
     if mode not in ("on", "off"):
         raise ValueError("mode must be 'on' or 'off'")
     if type(context) is not int or context not in CONTEXT_SIZES:
         raise ValueError("context must be 262144 or 1048576")
+    variant = MODEL_VARIANTS.get(model)
+    if variant is None:
+        raise ValueError("model must be one of: " + ", ".join(sorted(MODEL_VARIANTS)))
     repository_root = repository_root.resolve()
     strata_root = strata_root.resolve()
     data_root = data_root.resolve()
@@ -64,8 +95,8 @@ def render_profile(
     else:
         from strata_fork_update import selected_fork
     fork_root = selected_fork(strata_root).resolve()
-    model_root = data_root / "models" / "unsloth-UD-IQ4_XS"
-    pack_root = data_root / "packs" / "unsloth-ud-iq4_xs"
+    model_root = data_root.joinpath(*variant["model_dir"])
+    pack_root = data_root.joinpath(*variant["pack_dir"])
     replacements = {
         "@FORK_ROOT@": str(fork_root),
         "@MODEL_ROOT@": str(model_root),
@@ -73,6 +104,13 @@ def render_profile(
         "@STRATA_DATA_ROOT@": str(data_root),
         "@STRATA_ROOT@": str(strata_root),
     }
+    if model != "iq4_xs":
+        base = MODEL_VARIANTS["iq4_xs"]
+        # The templates are IQ4_XS literals; swap the file names, log stem and model id in one pass.
+        replacements[base["shard_native"]] = variant["shard_native"]
+        replacements[base["shard_ple"]] = variant["shard_ple"]
+        replacements[base["model_key"]] = variant["model_key"]
+        replacements[PROFILE_STEM] = variant["profile_stem"]
     template = json.loads(_template_path(repository_root, mode).read_text(encoding="utf-8"))
     profile = _replace_tokens(template, replacements)
     name_suffix = ""
@@ -138,7 +176,7 @@ def validate_templates(repository_root: Path) -> list[str]:
         assert args[args.index("--max-context") + 1] == "262144", f"{mode}: wrong context limit"
         assert "--ple-gguf" in args, f"{mode}: missing IQ4_XS PLE shard"
         assert args[args.index("--native") + 1].endswith(SHARD_NAMES[0])
-        assert args[args.index("--ple-gguf") + 1].endswith(SHARD_NAMES[1])
+        assert args[args.index("--ple-gguf") + 1].endswith(PLE_SHARD_NAME)
         assert args[args.index("--pack") + 1] == "@PACK_ROOT@"
         assert args[args.index("--spec") + 1] == "4", f"{mode}: wrong MTP depth"
         assert args[args.index("--spec-min-p") + 1] == "0.5", f"{mode}: wrong MTP threshold"
@@ -236,6 +274,8 @@ def main(argv: list[str] | None = None) -> int:
     render.add_argument("--data-root", type=Path, default=Path.home() / "Strata-data")
     render.add_argument("--output", type=Path, required=True)
     render.add_argument("--context", type=int, choices=CONTEXT_SIZES, default=262144)
+    render.add_argument("--model", choices=tuple(sorted(MODEL_VARIANTS)), default="iq4_xs",
+                        help="model variant (default: the existing IQ4_XS contract)")
     render.add_argument("--gpus", help="two nvidia-smi cards, for example 0,1: both run model layers "
                                        "(layer split); the last one runs the head, the draft and the verify")
 
@@ -268,6 +308,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.output,
                 args.context,
                 args.gpus,
+                args.model,
             )
             print(path)
         elif args.command == "validate-templates":

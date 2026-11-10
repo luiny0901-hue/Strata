@@ -55,8 +55,9 @@ build-vision*/
 build-vision.bat
 build-vision-cuda12.bat
 
-# setup.py outputs (engine, downloads) and release builds
+# setup.py outputs (engine, downloads) and release builds; engine-feed is the engine store a source install keeps for itself
 /engine/
+/engine-feed/
 /engine-sycl/
 /engine-cuda12/
 /build-release*/
@@ -81,6 +82,10 @@ build-vision-cuda12.bat
 !/run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-off-1m-2gpu.bat
 !/run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-on-2gpu.bat
 !/run-unsloth-ud-iq4_xs-nvfp4-fork-uncensored-off-2gpu.bat
+!/run-unsloth-ud-q4_k_xl-nvfp4-fork-uncensored-on.bat
+!/run-unsloth-ud-q4_k_xl-nvfp4-fork-uncensored-off.bat
+!/run-unsloth-ud-q4_k_xl-nvfp4-fork-uncensored-on-1m.bat
+!/run-unsloth-ud-q4_k_xl-nvfp4-fork-uncensored-off-1m.bat
 
 # Local source-integration backups, not distributable runtime assets.
 /serve/.response-guard/

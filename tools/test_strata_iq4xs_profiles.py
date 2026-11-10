@@ -129,6 +129,25 @@ class ProfileTemplateTests(unittest.TestCase):
                 self.assertTrue(profile["log"].endswith("-2gpu.log"))
                 self.assertEqual(plain.read_bytes(), before)
 
+    def test_q4kxl_variant_swaps_paths_shards_ids_and_log_stem(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            for mode in ("on", "off"):
+                iq4, q4 = base / (mode + ".json"), base / (mode + "-q4.json")
+                render_profile(ROOT, mode, ROOT, base, iq4)
+                render_profile(ROOT, mode, ROOT, base, q4, model="q4_k_xl")
+                p = json.loads(q4.read_text(encoding="utf-8"))
+                args = p["args"]
+                self.assertEqual(p["model_name"], "qwen3.8-flash-next-unsloth-ud-q4_k_xl")
+                self.assertTrue(args[args.index("--native") + 1].endswith("Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf"))
+                self.assertTrue(args[args.index("--ple-gguf") + 1].endswith("Qwen3.8-Flash-Next-UD-Q4_K_XL-00004-of-00004.gguf"))
+                self.assertEqual(Path(args[args.index("--pack") + 1]).name, "unsloth-ud-q4_k_xl")
+                self.assertTrue(p["vision"]["model"].endswith("Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf"))
+                self.assertTrue(Path(p["log"]).name.startswith("strata-unsloth-ud-q4_k_xl-nvfp4fork-uncensored-" + mode))
+                self.assertNotIn("iq4", json.dumps(p).lower())
+                self.assertEqual(json.loads(iq4.read_text(encoding="utf-8"))["model_name"], MODEL_KEY)
+                self.assertNotIn("q4_k_xl", json.dumps(json.loads(iq4.read_text(encoding="utf-8"))))
+
     def test_invalid_gpu_lists_keep_the_stored_profile(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "profile.json"
@@ -196,8 +215,8 @@ class ProfileTemplateTests(unittest.TestCase):
                     else:
                         self.assertNotIn(option, profile["args"])
                 self.assertIn("--ple-gguf", profile["args"])
-                self.assertTrue(profile["args"][profile["args"].index("--native") + 1].endswith("-00001-of-00003.gguf"))
-                self.assertTrue(profile["args"][profile["args"].index("--ple-gguf") + 1].endswith("-00002-of-00003.gguf"))
+                self.assertTrue(profile["args"][profile["args"].index("--native") + 1].endswith("-00001-of-00004.gguf"))
+                self.assertTrue(profile["args"][profile["args"].index("--ple-gguf") + 1].endswith("-00004-of-00004.gguf"))
                 self.assertEqual(profile["vision"]["gpu"], False)
                 self.assertIn(str(strata_root), profile["exe"])
                 self.assertIn(str(data_root), profile["args"][1])
@@ -226,7 +245,7 @@ class ProfileTemplateTests(unittest.TestCase):
 class AssetManifestTests(unittest.TestCase):
     def test_manifest_hashes_are_well_formed_and_reference_known_roots(self) -> None:
         manifest = json.loads(
-            (ROOT / "docs/reports/2026-10-17-iq4xs-artifact-manifest.json").read_text(
+            (ROOT / "docs/iq4xs-v31-artifact-manifest.json").read_text(
                 encoding="utf-8"
             )
         )
@@ -234,7 +253,7 @@ class AssetManifestTests(unittest.TestCase):
             manifest["model"]["revision"],
             MODEL_REVISION,
         )
-        self.assertGreaterEqual(len(manifest["files"]), 10)
+        self.assertEqual(len(manifest["files"]), 4)
         model_shards = {
             artifact["path"] for artifact in manifest["files"] if artifact["root"] == "model"
         }
@@ -263,7 +282,7 @@ class AssetManifestTests(unittest.TestCase):
             content = b"isolated iq4xs verification fixture"
             artifact = pack_root / "fixture.bin"
             artifact.write_bytes(content)
-            manifest_dir = temp_root / "docs" / "reports"
+            manifest_dir = temp_root / "docs"
             manifest_dir.mkdir(parents=True)
             manifest = {
                 "model": {"revision": MODEL_REVISION},
@@ -276,7 +295,7 @@ class AssetManifestTests(unittest.TestCase):
                     }
                 ]
             }
-            (manifest_dir / "2026-10-17-iq4xs-artifact-manifest.json").write_text(
+            (manifest_dir / "iq4xs-v31-artifact-manifest.json").write_text(
                 json.dumps(manifest), encoding="utf-8"
             )
             passed, results = verify_assets(
@@ -297,7 +316,7 @@ class AssetManifestTests(unittest.TestCase):
             pack_root.mkdir(parents=True)
             artifact = pack_root / "fixture.bin"
             artifact.write_bytes(b"changed after manifest")
-            manifest_dir = temp_root / "docs" / "reports"
+            manifest_dir = temp_root / "docs"
             manifest_dir.mkdir(parents=True)
             manifest = {
                 "model": {"revision": MODEL_REVISION},
@@ -310,7 +329,7 @@ class AssetManifestTests(unittest.TestCase):
                     }
                 ],
             }
-            (manifest_dir / "2026-10-17-iq4xs-artifact-manifest.json").write_text(
+            (manifest_dir / "iq4xs-v31-artifact-manifest.json").write_text(
                 json.dumps(manifest), encoding="utf-8"
             )
             passed, results = verify_assets(
@@ -338,6 +357,33 @@ class AssetManifestTests(unittest.TestCase):
             template = ROOT / f"profiles/strata-unsloth-ud-iq4_xs-nvfp4fork-uncensored-{mode}.json.template"
             profile = json.loads(template.read_text(encoding="utf-8"))
             self.assertIs(profile["uncensored"], mode == "on")
+
+    def test_q4kxl_launchers_use_managed_client_sync_and_context_wrappers(self) -> None:
+        for mode in ("on", "off"):
+            path = ROOT / f"run-unsloth-ud-q4_k_xl-nvfp4-fork-uncensored-{mode}.bat"
+            content = path.read_text(encoding="utf-8-sig").lower()
+            self.assertIn("--model q4_k_xl", content)
+            self.assertIn("--managed", content)
+            self.assertIn("managed-launchers.enabled", content)
+            self.assertIn("strata_server_supervisor.py", content)
+            self.assertIn("--sync-client-context", content)
+            self.assertIn("strata-unsloth-ud-q4_k_xl", content)
+            self.assertIn(f"uncensored mode is {mode}".lower(), content)
+            self.assertIn("exit /b 25", content)
+            self.assertIn("no process was stopped", content)
+            self.assertNotRegex(content, r"taskkill|stop-process")
+            wrapper = ROOT / f"run-unsloth-ud-q4_k_xl-nvfp4-fork-uncensored-{mode}-1m.bat"
+            wrapper_text = wrapper.read_text(encoding="utf-8-sig").lower()
+            self.assertIn("strata_q4kxl_context=1048576", wrapper_text)
+            self.assertIn(f"run-unsloth-ud-q4_k_xl-nvfp4-fork-uncensored-{mode}.bat", wrapper_text)
+
+    def test_profile_switcher_gives_managed_launchers_the_tools_path(self) -> None:
+        # A managed launcher runs serve/server.py from the fork root; without this line the
+        # patched server cannot import strata_anthropic_effort and the switch stalls until timeout.
+        text = (ROOT / "tools" / "strata_profile_switch.ps1").read_text(encoding="utf-8")
+        self.assertIn("$toolsPath = Join-Path ([string]$script:supervisor.working_directory) 'tools'", text)
+        self.assertIn('set "PYTHONPATH=', text)
+        self.assertIn("$toolsPath + ';%PYTHONPATH%\"", text)
 
 
 if __name__ == "__main__":

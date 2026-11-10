@@ -14,7 +14,7 @@
 
    이 패치는 검토된 fork 파일 해시만 허용합니다. 다른 fork 버전이면 적용하지 말고 먼저 해당 버전의 변경을 검토합니다.
 
-4. UD-IQ4_XS 모델 샤드, Strata pack, MTP, 비전 projector와 expert profile을 사용자 데이터 폴더에 복원합니다. 빠진 파일은 [ORCA 안내](ORCA.md)와 [아티팩트 매니페스트](reports/2026-10-17-iq4xs-artifact-manifest.json)에서 확인합니다. 모델 가중치와 fork 바이너리는 저장소에 포함되지 않습니다.
+4. UD-IQ4_XS 모델 샤드, Strata pack, MTP, 비전 projector와 expert profile을 사용자 데이터 폴더에 복원합니다. 빠진 파일은 [ORCA 안내](ORCA.md)와 [아티팩트 매니페스트](iq4xs-v31-artifact-manifest.json)에서 확인합니다. 모델 가중치와 fork 바이너리는 저장소에 포함되지 않습니다.
 5. 파일을 새로 내려받았거나 복원했으면 SHA-256 매니페스트로 확인합니다. 이 명령은 대형 모델 파일 전체를 읽으며 수 분 걸릴 수 있습니다.
 
    ```powershell

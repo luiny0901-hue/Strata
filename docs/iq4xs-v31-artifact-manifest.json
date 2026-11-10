@@ -1,0 +1,34 @@
+{
+  "model": {
+    "repository": "unsloth/Qwen3.8-Flash-Next-GGUF",
+    "revision": "084c631ac221016019d6e0a863afe92d90edd3b0",
+    "variant": "UD-IQ4_XS-v31",
+    "shards": 4
+  },
+  "files": [
+    {
+      "root": "model",
+      "path": "Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00004.gguf",
+      "size": 10946618,
+      "sha256": "93ff23a08e5cd7501f24fa16f5b415d5807d0175e04edd3ed6a7a41b601a4eef"
+    },
+    {
+      "root": "model",
+      "path": "Qwen3.8-Flash-Next-UD-IQ4_XS-00002-of-00004.gguf",
+      "size": 49604491008,
+      "sha256": "13d5dc8b93d039e4cfade5a9af7037f10c97f7ec4e53f75bd2e9ae34aae54aeb"
+    },
+    {
+      "root": "model",
+      "path": "Qwen3.8-Flash-Next-UD-IQ4_XS-00003-of-00004.gguf",
+      "size": 15256783680,
+      "sha256": "f6b9b5934908a2043732269dd740155d0f921d0763a1dcdd3452246311651f87"
+    },
+    {
+      "root": "model",
+      "path": "Qwen3.8-Flash-Next-UD-IQ4_XS-00004-of-00004.gguf",
+      "size": 28800138432,
+      "sha256": "5de8b5dbf89409acc39468decafd4a4a95b13c29d88a14b0356107897829ec36"
+    }
+  ]
+}
