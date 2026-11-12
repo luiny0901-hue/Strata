@@ -58,6 +58,28 @@ class LauncherImageBudgetTests(unittest.TestCase):
                     self.assertEqual(result.returncode,7)
                     self.assertIn(expected,result.stdout)
 
+    @unittest.skipUnless(os.name == 'nt', 'Windows CMD wrapper contract')
+    def test_q4kxl_2gpu_wrappers_forward_context_dual_and_arena_pin(self):
+        with tempfile.TemporaryDirectory(prefix='strata q4 2gpu ') as temporary:
+            root = Path(temporary)
+            for mode in ('on', 'off'):
+                stem = f'run-unsloth-ud-q4_k_xl-nvfp4-fork-uncensored-{mode}'
+                for suffix, expected in (('-2gpu', b'CONTEXT= DUAL=1 ARENA=20 MODE=--managed'),
+                                         ('-1m-2gpu', b'CONTEXT=1048576 DUAL=1 ARENA=20 MODE=--managed')):
+                    filename = stem + suffix + '.bat'
+                    (root / filename).write_bytes((ROOT / filename).read_bytes())
+                    (root / (stem + '.bat')).write_bytes(b'@echo off\r\n'
+                        b'echo CONTEXT=%STRATA_Q4KXL_CONTEXT% DUAL=%STRATA_Q4KXL_DUAL% '
+                        b'ARENA=%STRATA_ARENA_PIN_GIB% MODE=%1\r\nexit /b 7\r\n')
+                    # inside the supervisor's child the dual launcher delegates to its base launcher
+                    env = {**os.environ, 'STRATA_SUPERVISOR_CHILD': '1'}
+                    env.pop('STRATA_Q4KXL_CONTEXT', None)
+                    env.pop('STRATA_Q4KXL_DUAL', None)
+                    result = subprocess.run(['cmd.exe','/d','/c',str(root / filename)],
+                                            capture_output=True,timeout=10,env=env)
+                    self.assertEqual(result.returncode,7)
+                    self.assertIn(expected,result.stdout)
+
     def test_both_uncensored_modes_use_the_1024_image_token_budget(self) -> None:
         for mode in ("off", "on"):
             with self.subTest(mode=mode):
@@ -147,6 +169,20 @@ class ProfileTemplateTests(unittest.TestCase):
                 self.assertNotIn("iq4", json.dumps(p).lower())
                 self.assertEqual(json.loads(iq4.read_text(encoding="utf-8"))["model_name"], MODEL_KEY)
                 self.assertNotIn("q4_k_xl", json.dumps(json.loads(iq4.read_text(encoding="utf-8"))))
+
+    def test_q4kxl_dual_render_adds_layer_split_and_2gpu_suffix(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            for mode in ("on", "off"):
+                out = base / (mode + "-q4-2gpu.json")
+                render_profile(ROOT, mode, ROOT, base, out, model="q4_k_xl", gpus="0,1")
+                p = json.loads(out.read_text(encoding="utf-8"))
+                self.assertEqual(p["model_name"], "qwen3.8-flash-next-unsloth-ud-q4_k_xl")
+                self.assertEqual(p["gpu"], [0, 1])
+                self.assertEqual(p["args"][p["args"].index("--layer-split") + 1], "auto")
+                self.assertNotIn("--peer-device", p["args"])
+                self.assertTrue(Path(p["log"]).name.endswith("uncensored-" + mode + "-2gpu.log"))
+                self.assertTrue(p["args"][p["args"].index("--native") + 1].endswith("-00001-of-00004.gguf"))
 
     def test_invalid_gpu_lists_keep_the_stored_profile(self):
         with tempfile.TemporaryDirectory() as temporary:
