@@ -184,6 +184,29 @@ class ProfileTemplateTests(unittest.TestCase):
                 self.assertTrue(Path(p["log"]).name.endswith("uncensored-" + mode + "-2gpu.log"))
                 self.assertTrue(p["args"][p["args"].index("--native") + 1].endswith("-00001-of-00004.gguf"))
 
+    def test_dual_profiles_enable_pipeline_windows_and_env_knobs_add_args(self):
+        import os
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            cases = [("iq4-2gpu", {}), ("iq4-2gpu-1m", {"context": 1048576}),
+                     ("q4-2gpu", {"model": "q4_k_xl"}), ("q4-2gpu-1m", {"model": "q4_k_xl", "context": 1048576})]
+            for name, kwargs in cases:
+                out = base / (name + ".json")
+                render_profile(ROOT, "on", ROOT, base, out, gpus="0,1", **kwargs)
+                args = json.loads(out.read_text(encoding="utf-8"))["args"]
+                self.assertEqual(args.count("--pipeline-windows"), 1, name)
+                self.assertEqual(args[args.index("--pipeline-windows") + 1], "2", name)
+            plain = base / "env-off.json"
+            render_profile(ROOT, "on", ROOT, base, plain)
+            before = plain.read_bytes()
+            knob = base / "env-on.json"
+            with patch.dict(os.environ, {"STRATA_PROFILE_EXTRA_ARGS": "--pipeline-windows 2"}):
+                render_profile(ROOT, "on", ROOT, base, knob)
+            knob_args = json.loads(knob.read_text(encoding="utf-8"))["args"]
+            self.assertEqual(knob_args[knob_args.index("--pipeline-windows") + 1], "2")
+            self.assertNotIn("--pipeline-windows", json.loads(before.decode("utf-8"))["args"])
+
     def test_invalid_gpu_lists_keep_the_stored_profile(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "profile.json"

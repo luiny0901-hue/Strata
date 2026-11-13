@@ -133,6 +133,13 @@ def render_profile(
         profile["gpu"] = [int(parts[0]), int(parts[1])]
         profile["gpu_order"] = "as_given"
         profile["args"] += ["--layer-split", "auto"]
+        # Measured 2026-11-13 on the 2x RTX 3090 Ti rig (IQ4_XS 1M split, engine 0.1.44.1 fork):
+        # decode at a filled ~241K context went 48.3 -> 52.7 tok/s (+9%), warm reuse unchanged,
+        # one cold 241K fill cost 1.6% (inside the run-to-run band); per-card VRAM fell about
+        # 160 MiB as documented. The mechanism (overlapped verify windows) is context-size
+        # independent and docs/MULTI_GPU.md shows the same gain at 4K~32K prompts, so all
+        # dual profiles get it, 262K included (user decision, applied for consistency).
+        profile["args"] += ["--pipeline-windows", "2"]
         name_suffix += "-2gpu"
     if name_suffix:
         profile["log"] = str(Path(profile["log"]).with_name(Path(profile["log"]).stem + name_suffix + ".log"))
@@ -142,6 +149,12 @@ def render_profile(
         if gpu < 0:
             raise ValueError("STRATA_SERVER_GPU must be a nonnegative GPU index")
         profile["gpu"] = gpu
+    # A/B knob for engine flags the launchers do not render yet, for example
+    # STRATA_PROFILE_EXTRA_ARGS="--pipeline-windows 2". A helper BAT sets it and calls
+    # the normal launcher; a supervisor relaunch without the env reverts the profile.
+    extra_args = os.environ.get("STRATA_PROFILE_EXTRA_ARGS")
+    if extra_args:
+        profile["args"] += extra_args.split()
     serialized = json.dumps(profile, ensure_ascii=False, indent=2) + "\n"
     unresolved = (
         "@FORK_ROOT@",
