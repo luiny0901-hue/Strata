@@ -4,6 +4,10 @@ rem Layer split of both RTX 3090 Ti cards (GPU 1 runs the head last); this launc
 rem so switching back to a single card starts a fresh supervisor instead of restarting this profile.
 set "STRATA_IQ4XS_DUAL=1"
 set "STRATA_ARENA_PIN_GIB=20"
+rem Batched draft K/V on the head card: measured 2026-11-13 on this 2x 3090 Ti split, two
+rem sessions per arm - decode at a filled ~234K context +4.8% with per-arm separation,
+rem prefills flat within 0.5%, same VRAM (docs/MULTI_GPU.md: native pack + ring draft K/V).
+set "STRATA_SPLIT_MTP_BATCH=1"
 if not "%~1"=="" if /i not "%~1"=="--managed" (echo Supported option: --managed& exit /b 2)
 set "STRATA_ROOT=%~dp0"
 set "DATA_ROOT=%USERPROFILE%\Strata-data"

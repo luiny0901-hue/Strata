@@ -4,6 +4,10 @@ rem Layer split of both RTX 3090 Ti cards for UD-Q4_K_XL, uncensored OFF (GPU 1 
 rem This launcher supervises itself so switching back to another profile starts a fresh supervisor.
 set "STRATA_Q4KXL_DUAL=1"
 set "STRATA_ARENA_PIN_GIB=20"
+rem Batched draft K/V on the head card: measured 2026-11-13 on this 2x 3090 Ti split, two
+rem sessions per arm - decode at a filled ~234K context +4.8% with per-arm separation,
+rem prefills flat within 0.5%, same VRAM (docs/MULTI_GPU.md: native pack + ring draft K/V).
+set "STRATA_SPLIT_MTP_BATCH=1"
 if not "%~1"=="" if /i not "%~1"=="--managed" (echo Supported option: --managed& exit /b 2)
 set "STRATA_ROOT=%~dp0"
 set "DATA_ROOT=%USERPROFILE%\Strata-data"
