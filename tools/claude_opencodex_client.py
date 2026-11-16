@@ -132,11 +132,48 @@ def strata_upstream(home=None):
     return origin, {'Authorization': 'Bearer '+key} if key else {}
 
 
+def identity_probe_origins(base, home=None):
+    """List OpenCodex origins that may answer the identity routes (/healthz, /api/*).
+
+    When OpenCodex binds its public listener to a non-loopback interface, the same
+    port on 127.0.0.1 becomes a second listener that answers only /v1 data-plane
+    paths; health and management routes reply only on the recorded public bind in
+    runtime-port.json. Its pid ties an identity reply to this live instance. A
+    loopback-only or older install has no separate bind to probe and uses base.
+    """
+    origins = [(base, None)]
+    try:
+        record = read_json((home or Path.home())/'.opencodex'/'runtime-port.json', {})
+    except (OSError, ValueError):
+        return origins
+    host, port, pid = record.get('hostname'), record.get('port'), record.get('pid')
+    if (isinstance(host, str) and host and not any(character in host for character in '/@?# ')
+            and type(port) is int and 1 <= port <= 65535):
+        origin = f"{urlsplit(base).scheme or 'http'}://{f'[{host}]' if ':' in host else host}:{port}"
+        if origin != base:
+            origins.append((origin, pid if type(pid) is int and pid > 0 else None))
+    return origins
+
+
 def health(base, model, *, home=None, discover=True):
     headers = {'Authorization': 'Bearer opencodex-proxy'}
-    with urlopen(Request(base+'/healthz', headers=headers), timeout=5) as response:
-        status = json.load(response)
-    if status.get('status') != 'ok' or 'opencodex' not in status.get('service', '').lower():
+    # A split-bind install answers 404 for /healthz on loopback; the recorded
+    # public bind (identity_probe_origins) is the next candidate.
+    for origin, expected_pid in identity_probe_origins(base, home):
+        try:
+            with urlopen(Request(origin+'/healthz', headers=headers), timeout=5) as response:
+                status = json.load(response)
+        except HTTPError as error:
+            error.close()
+            continue
+        except (OSError, ValueError):
+            continue
+        if (isinstance(status, dict) and status.get('status') == 'ok'
+                and 'opencodex' in str(status.get('service') or '').lower()
+                and (expected_pid is None or type(status.get('pid')) is not int
+                     or status['pid'] == expected_pid)):
+            break
+    else:
         raise ValueError('해당 주소에서 OpenCodex 상태를 확인할 수 없습니다.')
     context = None
     if discover:
@@ -376,25 +413,35 @@ def management_json(home, base, path, *, body=None, timeout=2):
     if body is not None:
         headers['Content-Type'] = 'application/json'
         body = json.dumps(body).encode('utf-8')
-    request = Request(base+path, data=body, headers=headers,
-                      method='POST' if body is not None else 'GET')
     # Management credentials must never follow an HTTP redirect to another listener.
     from urllib.request import HTTPRedirectHandler, build_opener
     class NoRedirect(HTTPRedirectHandler):
         def redirect_request(self, *args, **kwargs):
             return None
     opener = build_opener(NoRedirect())
-    try:
-        with opener.open(request, timeout=timeout) as response:
-            raw = response.read(256*1024+1)
+    # On a split-bind install the loopback socket answers /api with 404; the
+    # recorded public bind (identity_probe_origins) is the next candidate.
+    reason = 'management_api_unavailable'
+    for origin, _pid in identity_probe_origins(base, home):
+        request = Request(origin+path, data=body, headers=headers,
+                          method='POST' if body is not None else 'GET')
+        try:
+            with opener.open(request, timeout=timeout) as response:
+                raw = response.read(256*1024+1)
+        except HTTPError as error:
+            error.close()
+            reason = f'management_http_{error.code}'
+            continue
+        except (OSError, ValueError):
+            reason = 'management_api_unavailable'
+            continue
         if len(raw) > 256*1024:
             return None, 'management_response_too_large'
-        return json.loads(raw), None
-    except HTTPError as error:
-        error.close()
-        return None, f'management_http_{error.code}'
-    except (OSError, ValueError):
-        return None, 'management_api_unavailable'
+        try:
+            return json.loads(raw), None
+        except ValueError:
+            reason = 'management_api_unavailable'
+    return None, reason
 
 
 def opencodex_request_pacing_activity(home=None, *, provider='strata'):

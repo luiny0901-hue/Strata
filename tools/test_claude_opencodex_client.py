@@ -983,6 +983,8 @@ class LiveReadinessFixtureTests(unittest.TestCase):
         self.slots = [{'id': 0, 'is_processing': False}]
         self.status_redirect = False
         self.status_too_large = False
+        self.loopback_healthz_404 = False; self.loopback_api_404 = False
+        self.healthz_body = {'status': 'ok', 'service': 'opencodex'}
         self.status = {'service': 'strata', 'loaded': True, 'cache_max_tokens': 262144,
             'concurrency': {'serving': 1, 'requested': 1},
             'activity': {'requests': 13, 'in_flight': 0, 'last_request_at': 1792964866,
@@ -1013,7 +1015,14 @@ class LiveReadinessFixtureTests(unittest.TestCase):
                 if self.path == '/v1/status' and fixture.status_too_large:
                     raw = b' ' * (256*1024+1)
                     self.send_response(200);self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
-                data = {'/healthz': {'status': 'ok', 'service': 'opencodex'},
+                # A split-bind install answers identity routes only on the public bind's Host.
+                if self.path.startswith('/api/') and fixture.loopback_api_404 and self.headers.get('Host', '').startswith('127.0.0.1'):
+                    self.send_response(404);self.end_headers();return
+                if self.path.startswith('/api/'):
+                    raw = json.dumps({'logs': []}).encode();self.send_response(200);self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
+                if self.path == '/healthz' and fixture.loopback_healthz_404 and self.headers.get('Host', '').startswith('127.0.0.1'):
+                    self.send_response(404);self.end_headers();return
+                data = {'/healthz': fixture.healthz_body,
                     '/v1/models': {'data': [{'id': 'strata/qwen-test', 'context_window': 262144}]},
                     '/health': {'status': 'ok', 'loaded': fixture.loaded, 'model': fixture.actual_model, 'max_context': 65536},
                     '/v1/status': fixture.status,
@@ -1065,6 +1074,31 @@ class LiveReadinessFixtureTests(unittest.TestCase):
     def test_maintenance_health_does_not_refresh_unrelated_provider_catalogs(self):
         self.assertEqual(shared.health(self.base,'strata/qwen-test',home=self.home,discover=False),65536)
         self.assertEqual([path for path,_ in self.auth], ['/healthz','/health'])
+
+    def test_health_probes_the_recorded_public_bind_when_loopback_answers_404(self):
+        self.loopback_healthz_404 = True
+        (self.home/'.opencodex'/'runtime-port.json').write_text(json.dumps(
+            {'pid': 4321, 'port': self.server.server_port, 'hostname': 'localhost'}))
+        self.assertEqual(shared.health(self.base,'strata/qwen-test',home=self.home),65536)
+        self.assertEqual([path for path,_ in self.auth], ['/healthz','/healthz','/v1/models','/health'])
+
+    def test_public_bind_health_from_a_different_instance_is_rejected(self):
+        self.loopback_healthz_404 = True
+        self.healthz_body = {'status': 'ok', 'service': 'opencodex', 'pid': 99}
+        (self.home/'.opencodex'/'runtime-port.json').write_text(json.dumps(
+            {'pid': 4321, 'port': self.server.server_port, 'hostname': 'localhost'}))
+        with self.assertRaisesRegex(ValueError, 'OpenCodex 상태'):
+            shared.health(self.base,'strata/qwen-test',home=self.home)
+
+    def test_management_api_falls_back_to_the_recorded_public_bind(self):
+        self.loopback_api_404 = True
+        token = 'ocx_admin_'+'a'*43
+        (self.home/'.opencodex'/'admin-api-token').write_text(token)
+        (self.home/'.opencodex'/'runtime-port.json').write_text(json.dumps(
+            {'pid': 4321, 'port': self.server.server_port, 'hostname': 'localhost'}))
+        value, error = shared.management_json(self.home, self.base, '/api/logs?limit=1')
+        self.assertEqual((value, error), ({'logs': []}, None))
+        self.assertEqual(self.auth.count(('/api/logs?limit=1', 'Bearer '+token)), 2)
 
     def test_strata_activity_reports_idle_and_busy_without_slot_details_or_credentials(self):
         idle = shared.strata_activity(self.home)
