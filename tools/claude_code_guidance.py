@@ -206,6 +206,16 @@ def language_reminder(root=ROOT):
             '이 알림은 작업 범위나 실행 허가를 추가하지 않는다.')
 
 
+def claude_hook_reminder():
+    """Claude sessions carry the full `## 언어` section in the managed CLAUDE.md, so the
+    SessionStart hook only re-primes the always-visible rules instead of restating them."""
+    return ('진행·완료 표시 문장은 기본 한국어다. 영문 문서·로그·검색 결과를 읽은 직후에도 한국어로 쓰고, '
+            '어긋나면 다음 문장부터 바로 돌아온다. 코드·식별자·원문과 사용자가 지정한 산출물 언어는 보존한다. '
+            '세부 언어·보고 기준은 같은 세션의 Claude Code 지침 `## 언어`와 `## 진행·최종 보고` 절을 정본으로 따르고, '
+            '보내기 전에 표시 문구와 창작 원고에서 의미 없는 외국어 조각과 대체 문자를 고친다. '
+            '이 알림은 새 기준을 추가하지 않으며 작업 범위나 실행 허가를 바꾸지 않는다.')
+
+
 def validate_managed_guidance(profile, assets, previous):
     """Refuse to replace Claude guidance that the user edited after setup."""
     digests = dict(previous.get('managed_guidance_sha256', {}))
@@ -290,7 +300,7 @@ def project_engine(project):
 
 
 def hook_context(event, root=ROOT):
-    context = language_reminder(root)
+    context = claude_hook_reminder()
     if event.get('hook_event_name') == 'SessionStart':
         session_id = event.get('session_id')
         if isinstance(session_id, str) and re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', session_id):

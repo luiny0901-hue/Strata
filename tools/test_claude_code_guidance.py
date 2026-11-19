@@ -479,6 +479,18 @@ class ProfessionalGuidanceTests(unittest.TestCase):
         normal = policy.hook_context({'hook_event_name':'SessionStart','source':'startup','cwd':str(self.project)})
         self.assertNotIn(policy.COMPACT_RESUME, normal)
 
+    def test_hook_context_carries_the_short_primer_not_the_codex_reminder(self):
+        context = policy.hook_context({'hook_event_name':'SessionStart','source':'startup','cwd':str(self.project)})
+        self.assertIn('진행·완료 표시 문장은 기본 한국어다', context)
+        self.assertIn('같은 세션의 Claude Code 지침', context)
+        self.assertNotIn(policy.language_reminder(), context)
+        for phrase in ('같은 화면 단추·메뉴 이름을', '일상 대화에는 업무 보고체를 붙이지 않고'):
+            self.assertNotIn(phrase, context)
+        guide = policy.guidance()
+        for phrase in ('도구 description에는 예정된 작업 이름만 짧게 적고 관측 결과·성공 여부·긴 보고문은 넣지 않는다',
+                       '일상 대화에 상투적인 교훈을 붙이지 않는다'):
+            self.assertIn(phrase, guide)
+
 
 if __name__ == '__main__':
     unittest.main()
